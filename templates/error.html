@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Feil - VM 2026 Tipping{% endblock %}
+{% block content %}
+<div class="error-page">
+  <div class="error-card">
+    <div class="error-icon">⚠️</div>
+    <h1>Feil</h1>
+    <p>{{ message }}</p>
+    <a href="{{ url_for('user.index') }}" class="btn btn-primary">Til forsiden</a>
+  </div>
+</div>
+{% endblock %}

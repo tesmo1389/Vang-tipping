@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Forhåndsvis import - VM 2026 Tipping{% endblock %}
+{% block content %}
+<div class="admin-section" style="padding: 20px;">
+  <h2>Forhåndsvis import</h2>
+
+  {% if result.errors %}
+  <div class="error-box">
+    <h3>Feil i importen:</h3>
+    <ul>
+      {% for err in result.errors %}
+      <li>{{ err }}</li>
+      {% endfor %}
+    </ul>
+    <a href="{{ url_for('admin.tab', tab='schedule') }}" class="btn btn-outline">← Tilbake</a>
+  </div>
+  {% else %}
+  <div class="success-box">
+    <p>✅ Validering OK. Klar til import.</p>
+    {% if result.new_matches is defined %}
+    <ul>
+      <li>Nye kamper: <strong>{{ result.new_matches }}</strong></li>
+      <li>Oppdaterte kamper: <strong>{{ result.updated_matches }}</strong></li>
+      <li>Nye grupper: <strong>{{ result.new_groups }}</strong></li>
+      <li>Nye lag: <strong>{{ result.new_teams }}</strong></li>
+    </ul>
+    {% endif %}
+  </div>
+
+  {% if preview_rows %}
+  <div class="preview-table-wrap">
+    <h3>Forhåndsvisning (maks 20 rader):</h3>
+    <div style="overflow-x:auto;">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            {% for key in preview_rows[0].keys() %}
+            <th>{{ key }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview_rows %}
+          <tr>
+            {% for v in row.values() %}
+            <td>{{ v }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <form method="POST" action="{{ confirm_url }}" style="margin-top: 20px;">
+    {% if csv_content_b64 is defined %}
+    <input type="hidden" name="csv_content_b64" value="{{ csv_content_b64 }}">
+    {% endif %}
+    {% if rows_json is defined %}
+    <input type="hidden" name="rows_json" value="{{ rows_json }}">
+    {% endif %}
+    <button type="submit" class="btn btn-primary btn-large">✅ Bekreft og importer</button>
+    <a href="{{ url_for('admin.tab', tab='schedule') }}" class="btn btn-outline">Avbryt</a>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

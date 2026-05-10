@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - VM 2026 Tipping</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="navbar admin-navbar">
+    <div class="navbar-inner">
+      <a href="{{ url_for('admin.tab', tab='groups') }}" class="navbar-brand">⚙️ Admin - VM 2026</a>
+      <div class="navbar-links">
+        <a href="{{ url_for('user.index') }}" class="nav-link-small">Brukerside</a>
+        <a href="{{ url_for('admin.logout') }}" class="nav-link-small">Logg ut</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="flash-messages">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+  </div>
+
+  <!-- Admin Tab Bar -->
+  <div class="admin-tab-bar">
+    {% set tabs = [
+      ('groups', '⚽ Grupper'),
+      ('knockout', '🏆 Sluttspill'),
+      ('matches', '📋 Kamper'),
+      ('users', '👥 Brukere'),
+      ('qr', '📱 QR/Invitasjoner'),
+      ('settings', '⚙️ Innstillinger'),
+      ('schedule', '📅 Kampplan-import'),
+    ] %}
+    {% for tab_id, tab_label in tabs %}
+    <a href="{{ url_for('admin.tab', tab=tab_id) }}"
+       class="admin-tab-link {% if active_tab == tab_id %}active{% endif %}">
+      {{ tab_label }}
+    </a>
+    {% endfor %}
+  </div>
+
+  <main class="admin-main">
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: GROUPS                                               -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'groups' %}
+  <div class="admin-section">
+    <h2>Grupper og gruppekamper</h2>
+
+    <!-- Import -->
+    <div class="admin-card">
+      <h3>Importer kamper fra Excel/CSV</h3>
+      <form method="POST" action="{{ url_for('admin.import_results') }}" enctype="multipart/form-data" class="inline-form">
+        <input type="file" name="results_file" accept=".xlsx,.csv" class="form-input" required>
+        <button type="submit" class="btn btn-primary">Forhåndsvis import</button>
+      </form>
+      <div class="template-links">
+        <a href="{{ url_for('admin.download_excel_template') }}" class="btn btn-sm btn-outline">⬇ Excel-mal</a>
+        <a href="{{ url_for('admin.download_csv_template') }}" class="btn btn-sm btn-outline">⬇ CSV-mal</a>
+      </div>
+    </div>
+
+    <!-- Group matches table per group -->
+    {% for group in groups %}
+    <div class="admin-card">
+      <h3 style="border-left: 4px solid {{ group.color }}; padding-left: 8px;">{{ group.name }}</h3>
+
+      <!-- Standings -->
+      {% if standings_by_group.get(group.id) %}
+      <table class="admin-table small-table" data-standings-group="{{ group.id }}">
+        <thead><tr><th>Lag</th><th>S</th><th>V</th><th>U</th><th>T</th><th>MF</th><th>MS</th><th>+/-</th><th>P</th><th>Pos</th><th>Override</th></tr></thead>
+        <tbody>
+          {% for s in standings_by_group.get(group.id, []) %}
+          <tr>
+            <td>{{ s.team.name }}</td>
+            <td>{{ s.played }}</td><td>{{ s.wins }}</td><td>{{ s.draws }}</td><td>{{ s.losses }}</td>
+            <td>{{ s.goals_for }}</td><td>{{ s.goals_against }}</td>
+            <td>{{ s.goal_difference }}</td><td>{{ s.points }}</td>
+            <td><strong>{{ s.rank or '-' }}</strong></td>
+            <td>
+              <form method="POST" action="{{ url_for('admin.override_standing') }}" class="inline-mini">
+                <input type="hidden" name="group_id" value="{{ group.id }}">
+                <input type="hidden" name="team_id" value="{{ s.team_id }}">
+                <input type="number" name="rank" value="{{ s.manual_rank_override or '' }}" min="1" max="4" class="mini-input" placeholder="#">
+                <button type="submit" class="btn btn-xs">OK</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      <!-- Group matches -->
+      {% for match in group_matches %}
+        {% if match.group_id == group.id %}
+        <div class="admin-match-row">
+          <span class="match-num">#{{ match.match_number }}</span>
+          <span class="match-teams-txt">
+            {{ match.home_team.name if match.home_team else '?' }} vs {{ match.away_team.name if match.away_team else '?' }}
+          </span>
+          {% if match.kickoff_at_oslo_cache %}<span class="match-time-txt">{{ match.kickoff_at_oslo_cache }}</span>{% endif %}
+
+          <form method="POST" action="{{ url_for('admin.save_match_result', match_id=match.id) }}" class="result-form">
+            <input type="hidden" name="next_tab" value="groups">
+            <input type="number" name="home_score" value="{{ match.home_score if match.home_score is not none else '' }}"
+              min="0" max="20" placeholder="H" class="score-mini">
+            <span>–</span>
+            <input type="number" name="away_score" value="{{ match.away_score if match.away_score is not none else '' }}"
+              min="0" max="20" placeholder="B" class="score-mini">
+            <label class="checkbox-label">
+              <input type="checkbox" name="is_finished" value="1" {% if match.is_finished %}checked{% endif %}> Ferdig
+            </label>
+            <input type="text" name="result_note" value="{{ match.result_note or '' }}" placeholder="Notat" class="form-input short">
+            <button type="submit" class="btn btn-sm btn-save">Lagre</button>
+          </form>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: KNOCKOUT                                             -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'knockout' %}
+  <div class="admin-section">
+    <h2>Sluttspill</h2>
+    <form method="POST" action="{{ url_for('admin.trigger_fill_round_of_32') }}">
+      <button type="submit" class="btn btn-primary">🔄 Fyll Round of 32 automatisk</button>
+    </form>
+
+    {% set round_order = ['round_of_32', 'round_of_16', 'quarter_final', 'semi_final', 'third_place', 'final'] %}
+    {% set round_labels = {
+      'round_of_32': 'Round of 32',
+      'round_of_16': 'Åttendedelsfinale',
+      'quarter_final': 'Kvartfinale',
+      'semi_final': 'Semifinale',
+      'third_place': 'Bronsefinale',
+      'final': '🏆 Finale'
+    } %}
+
+    {% for rn in round_order %}
+    {% set rn_matches = knockout_matches | selectattr('round_name', 'equalto', rn) | list %}
+    {% if rn_matches %}
+    <div class="admin-card">
+      <h3>{{ round_labels.get(rn, rn) }}</h3>
+      {% for match in rn_matches %}
+      <div class="admin-knockout-card">
+        <div class="match-header-row">
+          <strong>#{{ match.match_number }}</strong>
+          {% if match.kickoff_at_oslo_cache %}<span>{{ match.kickoff_at_oslo_cache }}</span>{% endif %}
+          <span class="status-badge {% if match.is_finished %}badge-finished{% elif match.effective_locked %}badge-locked{% elif match.is_open_for_betting %}badge-open{% else %}badge-waiting{% endif %}">
+            {% if match.is_finished %}Ferdig{% elif match.effective_locked %}Låst{% elif match.is_open_for_betting %}Åpen{% else %}Venter{% endif %}
+          </span>
+        </div>
+
+        <div class="teams-row">
+          <span>{{ match.home_team.name if match.home_team else (match.home_slot_source or 'TBD') }}</span>
+          <span class="vs-text">VS</span>
+          <span>{{ match.away_team.name if match.away_team else (match.away_slot_source or 'TBD') }}</span>
+        </div>
+
+        <form method="POST" action="{{ url_for('admin.save_knockout_result', match_id=match.id) }}" class="result-form-ko">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Kampstart (Oslo)</label>
+              <input type="datetime-local" name="kickoff_at_oslo"
+                value="{{ match.kickoff_at_oslo_cache.replace(' ', 'T') if match.kickoff_at_oslo_cache else '' }}"
+                class="form-input">
+            </div>
+            <div class="form-group">
+              <label>Hjemme</label>
+              <input type="number" name="home_score" value="{{ match.home_score if match.home_score is not none else '' }}"
+                min="0" max="20" placeholder="-" class="score-mini">
+            </div>
+            <div class="form-group">
+              <label>Borte</label>
+              <input type="number" name="away_score" value="{{ match.away_score if match.away_score is not none else '' }}"
+                min="0" max="20" placeholder="-" class="score-mini">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Lag videre</label>
+              <select name="advanced_team_id" class="form-select">
+                <option value="">Velg</option>
+                {% if match.home_team %}<option value="{{ match.home_team_id }}" {% if match.advanced_team_id == match.home_team_id %}selected{% endif %}>{{ match.home_team.name }}</option>{% endif %}
+                {% if match.away_team %}<option value="{{ match.away_team_id }}" {% if match.advanced_team_id == match.away_team_id %}selected{% endif %}>{{ match.away_team.name }}</option>{% endif %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Lås-overstyring</label>
+              <select name="manual_lock_override" class="form-select">
+                <option value="">Auto</option>
+                <option value="lock" {% if match.manual_lock_override == True %}selected{% endif %}>🔒 Tving låst</option>
+                <option value="open" {% if match.manual_lock_override == False %}selected{% endif %}>🔓 Tving åpen</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Notat</label>
+              <input type="text" name="result_note" value="{{ match.result_note or '' }}" class="form-input" placeholder="f.eks. e.o. / straffer">
+            </div>
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" name="is_finished" value="1" {% if match.is_finished %}checked{% endif %}> Kamp ferdig
+          </label>
+          <button type="submit" class="btn btn-sm btn-save">Lagre</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: USERS                                                -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'users' %}
+  <div class="admin-section">
+    <h2>Påmeldte brukere</h2>
+    <div class="admin-actions">
+      <form method="POST" action="{{ url_for('admin.recalculate') }}" style="display:inline">
+        <button type="submit" class="btn btn-primary">🔄 Reberegn alle poeng</button>
+      </form>
+      <a href="{{ url_for('admin.export_users') }}" class="btn btn-outline">⬇ Eksporter CSV</a>
+    </div>
+
+    {% if scoreboard %}
+    <table class="admin-table">
+      <thead>
+        <tr><th>#</th><th>Navn</th><th>E-post</th><th>Registrert</th><th>Sist aktiv</th><th>Poeng</th><th>Aktiv</th><th>Handling</th></tr>
+      </thead>
+      <tbody>
+        {% for entry in scoreboard %}
+        <tr>
+          <td>{{ entry.rank }}</td>
+          <td>{{ entry.user.name }}</td>
+          <td>{{ entry.user.email or '-' }}</td>
+          <td>{{ entry.user.created_at.strftime('%d.%m.%Y') if entry.user.created_at else '-' }}</td>
+          <td>{{ entry.user.last_seen_at.strftime('%d.%m.%Y %H:%M') if entry.user.last_seen_at else '-' }}</td>
+          <td><strong>{{ entry.points }}</strong></td>
+          <td>{{ '✅' if entry.user.is_active else '❌' }}</td>
+          <td>
+            <a href="{{ url_for('admin.user_detail', user_id=entry.user.id, tab='points') }}" class="btn btn-xs btn-outline">Detaljer</a>
+            {% if entry.user.is_active %}
+            <form method="POST" action="{{ url_for('admin.deactivate_user', user_id=entry.user.id) }}" style="display:inline">
+              <button type="submit" class="btn btn-xs btn-danger" onclick="return confirm('Deaktivere bruker?')">Deaktiver</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>Ingen brukere registrert ennå.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: QR / INVITATIONS                                     -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'qr' %}
+  <div class="admin-section">
+    <h2>QR-koder og invitasjoner</h2>
+    <form method="POST" action="{{ url_for('admin.generate_invite') }}">
+      <button type="submit" class="btn btn-primary">+ Generer ny invitasjon</button>
+    </form>
+
+    <table class="admin-table">
+      <thead>
+        <tr><th>Opprettet</th><th>Token (kort)</th><th>Brukt</th><th>Bruker</th><th>Aktiv</th><th>Handling</th></tr>
+      </thead>
+      <tbody>
+        {% for inv in invite_tokens %}
+        <tr>
+          <td>{{ inv.created_at.strftime('%d.%m.%Y %H:%M') if inv.created_at else '-' }}</td>
+          <td><code>{{ inv.token[:12] }}...</code></td>
+          <td>{{ inv.used_at.strftime('%d.%m.%Y') if inv.used_at else '–' }}</td>
+          <td>{{ inv.used_by_user.name if inv.used_by_user else '–' }}</td>
+          <td>{{ '✅' if inv.is_active else '❌' }}</td>
+          <td>
+            <a href="{{ url_for('admin.show_qr', invite_id=inv.id) }}" class="btn btn-xs btn-outline">📱 Vis QR</a>
+            {% if inv.is_active %}
+            <form method="POST" action="{{ url_for('admin.deactivate_invite', invite_id=inv.id) }}" style="display:inline">
+              <button type="submit" class="btn btn-xs btn-danger">Deaktiver</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: SETTINGS                                             -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'settings' %}
+  <div class="admin-section">
+    <h2>Innstillinger</h2>
+    <form method="POST" action="{{ url_for('admin.save_settings') }}" class="settings-form">
+      <div class="admin-card">
+        <h3>Konkurranseinnstillinger</h3>
+        <div class="form-group">
+          <label>Konkurransenavn</label>
+          <input type="text" name="competition_name" class="form-input"
+            value="{{ comp_settings.get('competition_name', 'VM 2026 Tipping') }}">
+        </div>
+        <div class="form-group">
+          <label>Innskudd per deltager (kr)</label>
+          <input type="number" name="entry_fee" class="form-input" min="0" step="1"
+            value="{{ comp_settings.get('entry_fee', '250') }}">
+        </div>
+        <div class="form-group">
+          <label>Automatisk premiepott</label>
+          <div class="form-input" style="background:#f8fafc;display:flex;align-items:center;min-height:42px;">
+            {{ prize_summary.prize_pool if prize_summary else 0 }} kr
+          </div>
+          <small style="color:#64748b;display:block;margin-top:6px;">
+            {{ prize_summary.participants if prize_summary else 0 }} deltagere x {{ prize_summary.entry_fee if prize_summary else 250 }} kr, {{ prize_summary.admin_fee_percent if prize_summary else 9 }}% admin fee, avrundet opp til nærmeste 25.
+          </small>
+        </div>
+        <div class="form-group">
+          <label>Låsetidspunkt gruppespill (UTC, ISO-format)</label>
+          <input type="text" name="group_stage_lock_at" class="form-input"
+            value="{{ comp_settings.get('group_stage_lock_at', '') }}"
+            placeholder="2026-06-11T13:00:00">
+        </div>
+        <div class="form-group">
+          <label>Vis offentlig statistikk</label>
+          <select name="show_public_statistics" class="form-select">
+            <option value="1" {% if comp_settings.get('show_public_statistics', '1') == '1' %}selected{% endif %}>Ja</option>
+            <option value="0" {% if comp_settings.get('show_public_statistics') == '0' %}selected{% endif %}>Nei</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Vis scoreboard</label>
+          <select name="show_scoreboard" class="form-select">
+            <option value="1" {% if comp_settings.get('show_scoreboard', '1') == '1' %}selected{% endif %}>Ja</option>
+            <option value="0" {% if comp_settings.get('show_scoreboard') == '0' %}selected{% endif %}>Nei</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Poengregler</h3>
+        {% set score_labels = {
+          'group_hub': 'Riktig HUB (gruppe)',
+          'group_exact': 'Eksakt resultat (gruppe)',
+          'group_winner': 'Riktig gruppevinner',
+          'group_second': 'Riktig andreplass',
+          'group_advance': 'Riktig lag videre fra gruppe',
+          'knockout_exact': 'Eksakt resultat (sluttspill)',
+          'knockout_advance': 'Riktig lag videre (sluttspill)',
+          'knockout_finalist': 'Riktig finalist',
+          'knockout_champion': 'Riktig verdensmester',
+        } %}
+        {% for k, label in score_labels.items() %}
+        <div class="form-group form-inline">
+          <label>{{ label }}</label>
+          <input type="number" name="score_{{ k }}" class="form-input short"
+            value="{{ score_settings.get(k, default_scores.get(k, '')) }}">
+        </div>
+        {% endfor %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Lagre innstillinger</button>
+    </form>
+
+    <div class="admin-card">
+      <h3>Manuell reberegning</h3>
+      <form method="POST" action="{{ url_for('admin.recalculate') }}">
+        <button type="submit" class="btn btn-primary">🔄 Reberegn alle poeng nå</button>
+      </form>
+    </div>
+
+    <div class="admin-card" style="border: 2px solid #fca5a5;">
+      <h3 style="color:#b91c1c;">⚠️ Testnullstilling</h3>
+      <p style="font-size:0.9rem;color:#6b7280;margin-bottom:12px;">Nullstiller alle kamper i både gruppespill og sluttspill (resultat, status, videre-lag), samt tabeller og poengcache.</p>
+      <form method="POST" action="{{ url_for('admin.reset_knockout') }}" onsubmit="return confirm('Nullstille alle kamper i gruppespill og sluttspill, med resultater og avledede data?')">
+        <button type="submit" class="btn btn-danger">🗑️ Nullstill alle kamper</button>
+      </form>
+
+      <p style="font-size:0.9rem;color:#6b7280;margin:16px 0 12px;">Nullstiller alle tips fra alle brukere (kamp- og gruppetips), samt poengcache.</p>
+      <form method="POST" action="{{ url_for('admin.reset_user_tips') }}" onsubmit="return confirm('Nullstille all tipping for alle brukere?')">
+        <button type="submit" class="btn btn-danger">🧹 Nullstill all tipping</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: SCHEDULE IMPORT                                      -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: KAMPER                                               -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'matches' %}
+  <div class="admin-section">
+    <h2>Alle kamper</h2>
+    <div class="admin-card" style="overflow-x:auto">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Fase</th>
+            <th>Runde</th>
+            <th>Gruppe</th>
+            <th>Kampstart (Oslo)</th>
+            <th>Hjemmelag</th>
+            <th>Resultat</th>
+            <th>Bortelag</th>
+            <th>Arena</th>
+            <th>By</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for m in all_matches %}
+          {% set home_name = m.home_team.name if m.home_team else (m.home_slot or 'TBD') %}
+          {% set away_name = m.away_team.name if m.away_team else (m.away_slot or 'TBD') %}
+          {% if m.is_finished %}
+            {% set row_style = 'background:#f0fdf4' %}
+          {% elif m.effective_locked %}
+            {% set row_style = 'background:#fffbeb' %}
+          {% else %}
+            {% set row_style = '' %}
+          {% endif %}
+          <tr style="{{ row_style }}">
+            <td><strong>{{ m.match_number }}</strong></td>
+            <td>{{ 'Gruppe' if m.phase == 'group' else 'Sluttspill' }}</td>
+            <td style="white-space:nowrap">{{ m.round_name | replace('_', ' ') | title }}</td>
+            <td>{{ m.group.name if m.group else '-' }}</td>
+            <td style="white-space:nowrap">{{ m.kickoff_at_utc | oslo_time if m.kickoff_at_utc else '-' }}</td>
+            <td>{{ home_name }}</td>
+            <td style="text-align:center;font-weight:700">
+              {% if m.home_score is not none and m.away_score is not none %}
+                {{ m.home_score }} – {{ m.away_score }}
+              {% else %}
+                –
+              {% endif %}
+            </td>
+            <td>{{ away_name }}</td>
+            <td>{{ m.venue or '-' }}</td>
+            <td>{{ m.city or '-' }}</td>
+            <td>
+              {% if m.is_finished %}
+                <span class="status-badge badge-finished">Ferdig</span>
+              {% elif m.effective_locked %}
+                <span class="status-badge badge-locked">Låst</span>
+              {% else %}
+                <span class="status-badge badge-open">Åpen</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'schedule' %}
+  <div class="admin-section">
+    <h2>Kampplan-import (CSV)</h2>
+    <div class="admin-card">
+      <h3>Importer offisiell kampplan</h3>
+      <form method="POST" action="{{ url_for('admin.import_schedule') }}" enctype="multipart/form-data">
+        <div class="form-group">
+          <label>CSV-fil</label>
+          <input type="file" name="schedule_file" accept=".csv" class="form-input" required>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" name="dry_run" value="1"> Tørrkjør (forhåndsvis uten å lagre)
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Importer kampplan</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  </main>
+
+  <footer class="footer">
+    <p>VM 2026 Tipping Admin &copy; 2026</p>
+  </footer>
+
+<script>
+// AJAX for result-form, result-form-ko, inline-mini — no page jump
+document.addEventListener('submit', function(e) {
+  var form = e.target;
+  var isAjax = form.classList.contains('result-form') ||
+               form.classList.contains('result-form-ko') ||
+               form.classList.contains('inline-mini');
+  if (!isAjax) return;
+  e.preventDefault();
+
+  var btn = form.querySelector('button[type="submit"]');
+  var origText = btn ? btn.textContent : '';
+  if (btn) btn.disabled = true;
+
+  fetch(form.action, {
+    method: 'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    body: new FormData(form)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(res) {
+    if (btn) {
+      btn.textContent = res.ok ? '\u2713 Lagret' : '\u26a0 Feil';
+      btn.style.background = res.ok ? '#16a34a' : '#dc2626';
+      setTimeout(function() {
+        btn.textContent = origText;
+        btn.style.background = '';
+        btn.disabled = false;
+      }, 1500);
+    }
+    if (res.flash) {
+      var bar = document.querySelector('.flash-messages');
+      if (bar) {
+        var msg = document.createElement('div');
+        msg.className = 'flash flash-' + (res.ok ? 'success' : 'error');
+        msg.textContent = res.flash;
+        bar.appendChild(msg);
+        setTimeout(function() { msg.remove(); }, 3000);
+      }
+    }
+    // Refresh standings table if this was a group match save
+    if (res.ok && form.classList.contains('result-form')) {
+      var row = form.closest('.admin-match-row');
+      var card = row ? row.closest('.admin-card') : null;
+      if (card) {
+        var table = card.querySelector('[data-standings-group]');
+        if (table) {
+          var gid = table.getAttribute('data-standings-group');
+          fetch('/admin/api/standings/' + gid, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (!data.rows) return;
+              var tbody = table.querySelector('tbody');
+              tbody.innerHTML = data.rows.map(function(s) {
+                return '<tr>' +
+                  '<td>' + s.name + '</td>' +
+                  '<td>' + s.played + '</td><td>' + s.wins + '</td><td>' + s.draws + '</td><td>' + s.losses + '</td>' +
+                  '<td>' + s.goals_for + '</td><td>' + s.goals_against + '</td>' +
+                  '<td>' + s.goal_difference + '</td><td>' + s.points + '</td>' +
+                  '<td><strong>' + s.rank + '</strong></td>' +
+                  '<td><form method="POST" action="/admin/standing/override" class="inline-mini">' +
+                  '<input type="hidden" name="group_id" value="' + data.group_id + '">' +
+                  '<input type="hidden" name="team_id" value="' + s.team_id + '">' +
+                  '<input type="number" name="rank" value="' + s.manual_rank_override + '" min="1" max="4" class="mini-input" placeholder="#">' +
+                  '<button type="submit" class="btn btn-xs">OK</button></form></td>' +
+                  '</tr>';
+              }).join('');
+            });
+        }
+      }
+    }
+  })
+  .catch(function() {
+    if (btn) { btn.textContent = origText; btn.style.background = ''; btn.disabled = false; }
+  });
+});
+</script>
+</body>
+</html>

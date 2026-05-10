@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Bruker</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <nav class="navbar admin-navbar">
+    <div class="navbar-inner">
+      <a href="{{ url_for('admin.tab', tab='groups') }}" class="navbar-brand">⚙️ Admin - VM 2026</a>
+      <div class="navbar-links">
+        <a href="{{ url_for('user.index') }}" class="nav-link-small">Brukerside</a>
+        <a href="{{ url_for('admin.logout') }}" class="nav-link-small">Logg ut</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="flash-messages">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+  </div>
+
+  <div class="admin-tab-bar">
+    {% set tabs = [
+      ('groups', '⚽ Grupper'),
+      ('knockout', '🏆 Sluttspill'),
+      ('matches', '📋 Kamper'),
+      ('users', '👥 Brukere'),
+      ('qr', '📱 QR/Invitasjoner'),
+      ('settings', '⚙️ Innstillinger'),
+      ('schedule', '📅 Kampplan-import'),
+    ] %}
+    {% for tab_id, tab_label in tabs %}
+    <a href="{{ url_for('admin.tab', tab=tab_id) }}"
+       class="admin-tab-link {% if active_tab == tab_id %}active{% endif %}">
+      {{ tab_label }}
+    </a>
+    {% endfor %}
+  </div>
+
+  <main class="admin-main">
+    <div class="admin-section">
+      <div class="admin-user-header">
+        <div>
+          <h2>Bruker: {{ user.name }}</h2>
+          <div class="admin-user-sub">{{ user.email or '-' }}</div>
+        </div>
+        <div class="admin-user-actions">
+          <a href="{{ url_for('admin.user_predictions_pdf', user_id=user.id) }}" class="btn btn-outline">Last ned PDF</a>
+          <a href="{{ url_for('admin.tab', tab='users') }}" class="btn btn-outline">Tilbake</a>
+        </div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Poengoversikt</h3>
+        <div class="admin-score-grid">
+          <div class="admin-score-item">
+            <div class="score-label">Totalt</div>
+            <div class="score-value">{{ total_points }}</div>
+          </div>
+          {% for k, v in breakdown.items() %}
+          <div class="admin-score-item">
+            <div class="score-label">{{ k }}</div>
+            <div class="score-value">{{ v }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Gruppeplasseringer (poeng)</h3>
+        {% if group_rows %}
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Gruppe</th>
+              <th>Vinner (tips)</th>
+              <th>Vinner (fasit)</th>
+              <th>Andreplass (tips)</th>
+              <th>Andreplass (fasit)</th>
+              <th>Vinner</th>
+              <th>Andre</th>
+              <th>Videre</th>
+              <th>Sum</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in group_rows %}
+            <tr>
+              <td>{{ row.group_name }}</td>
+              <td>{{ row.pred_winner }}</td>
+              <td>{{ row.actual_winner }}</td>
+              <td>{{ row.pred_second }}</td>
+              <td>{{ row.actual_second }}</td>
+              <td><strong>{{ row.winner_pts }}</strong></td>
+              <td><strong>{{ row.second_pts }}</strong></td>
+              <td><strong>{{ row.advance_pts }}</strong></td>
+              <td><strong>{{ row.total_pts }}</strong></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Ingen gruppetips registrert.</p>
+        {% endif %}
+      </div>
+
+      <div class="admin-card">
+        <h3>Gruppekamper (poeng)</h3>
+        {% if match_rows_group %}
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Kamp</th>
+              <th>Fasit</th>
+              <th>Tips</th>
+              <th>HUB</th>
+              <th>Poeng</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in match_rows_group %}
+            <tr>
+              <td>{{ row.match_number }}</td>
+              <td>{{ row.home }} vs {{ row.away }}</td>
+              <td>{{ row.actual_score }}</td>
+              <td>{{ row.pred_score }}</td>
+              <td>{{ row.pred_hub }} / {{ row.actual_hub }}</td>
+              <td><strong>{{ row.points if row.points is not none else '-' }}</strong></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Ingen kamptips registrert i gruppespill.</p>
+        {% endif %}
+      </div>
+
+      <div class="admin-card">
+        <h3>Sluttspill (poeng)</h3>
+        {% if match_rows_knockout %}
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Kamp</th>
+              <th>Fasit</th>
+              <th>Tips</th>
+              <th>Videre (tips)</th>
+              <th>Videre (fasit)</th>
+              <th>Poeng</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in match_rows_knockout %}
+            <tr>
+              <td>{{ row.match_number }}</td>
+              <td>{{ row.home }} vs {{ row.away }}</td>
+              <td>{{ row.actual_score }}</td>
+              <td>{{ row.pred_score }}</td>
+              <td>{{ row.pred_advanced }}</td>
+              <td>{{ row.actual_advanced }}</td>
+              <td><strong>{{ row.points if row.points is not none else '-' }}</strong></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Ingen sluttspilltips registrert.</p>
+        {% endif %}
+      </div>
+      <div class="admin-card">
+        <h3>Tips (alle)</h3>
+        <p class="admin-user-sub">Samlet oversikt over alt som er tippet.</p>
+      </div>
+
+      <div class="admin-card">
+        <h3>Gruppetips</h3>
+        {% if group_rows %}
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Gruppe</th>
+              <th>Vinner</th>
+              <th>Andreplass</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in group_rows %}
+            <tr>
+              <td>{{ row.group_name }}</td>
+              <td>{{ row.pred_winner }}</td>
+              <td>{{ row.pred_second }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Ingen gruppetips registrert.</p>
+        {% endif %}
+      </div>
+
+      <div class="admin-card">
+        <h3>Kamptips</h3>
+        {% if match_rows_group or match_rows_knockout %}
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fase</th>
+              <th>Kamp</th>
+              <th>Tips</th>
+              <th>HUB</th>
+              <th>Videre</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in match_rows_group %}
+            <tr>
+              <td>{{ row.match_number }}</td>
+              <td>Gruppe</td>
+              <td>{{ row.home }} vs {{ row.away }}</td>
+              <td>{{ row.pred_score }}</td>
+              <td>{{ row.pred_hub }}</td>
+              <td>-</td>
+            </tr>
+            {% endfor %}
+            {% for row in match_rows_knockout %}
+            <tr>
+              <td>{{ row.match_number }}</td>
+              <td>Sluttspill</td>
+              <td>{{ row.home }} vs {{ row.away }}</td>
+              <td>{{ row.pred_score }}</td>
+              <td>{{ row.pred_hub }}</td>
+              <td>{{ row.pred_advanced }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Ingen kamptips registrert.</p>
+        {% endif %}
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <p>VM 2026 Tipping Admin &copy; 2026</p>
+  </footer>
+</body>
+</html>

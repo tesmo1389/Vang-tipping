@@ -1,0 +1,566 @@
+{% extends "base.html" %}
+{% block title %}{{ user.name }} - VM 2026 Tipping{% endblock %}
+{% block content %}
+<div class="user-page">
+  <div class="user-header">
+    <h2>Hei, {{ user.name }}! ⚽</h2>
+    <p class="user-points-badge">{{ total_points if total_points is defined else 0 }} poeng</p>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tab-bar">
+    <a href="{{ url_for('user.index') }}"
+       class="tab-link {% if active_tab == 'group' %}active{% endif %}">⚽ Gruppespill</a>
+    <a href="{{ url_for('user.knockout') }}"
+       class="tab-link {% if active_tab == 'knockout' %}active{% endif %}">🏆 Sluttspill</a>
+    <a href="{{ url_for('user.stats') }}"
+       class="tab-link {% if active_tab == 'stats' %}active{% endif %}">📊 Resultater</a>
+  </div>
+
+  <!-- TAB: GROUP STAGE -->
+  {% if active_tab == 'group' %}
+  <div class="tab-content">
+    {% if group_data %}
+      {% for gd in group_data %}
+      {% set group = gd.group %}
+      {% set gp = gd.group_prediction %}
+      <div class="group-section" style="border-top: 4px solid {{ group.color }};">
+        <div class="group-header" style="background: {{ group.color }}20;">
+          <h3 style="color: {{ group.color }};">{{ group.name }}</h3>
+          <div class="group-teams-row">
+            {% for team in gd.teams %}
+            <span class="team-chip">{{ team.name }}</span>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Group position prediction -->
+        <div class="group-position-form">
+          <h4>Tippe gruppeplassering</h4>
+          <form method="POST" action="{{ url_for('user.predict_group', group_id=group.id) }}" class="group-pred-form">
+            <div class="group-position-grid">
+              <div class="position-row">
+                <label>🥇 Gruppevinner:</label>
+                <select name="winner_team_id" class="form-select" {% if gd.group_locked %}disabled{% endif %}>
+                  <option value="">Velg lag</option>
+                  {% for team in gd.teams %}
+                  <option value="{{ team.id }}"
+                    {% if gp and gp.predicted_winner_team_id == team.id %}selected{% endif %}>
+                    {{ team.name }}
+                  </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="position-row">
+                <label>🥈 Andreplass:</label>
+                <select name="second_team_id" class="form-select" {% if gd.group_locked %}disabled{% endif %}>
+                  <option value="">Velg lag</option>
+                  {% for team in gd.teams %}
+                  <option value="{{ team.id }}"
+                    {% if gp and gp.predicted_second_team_id == team.id %}selected{% endif %}>
+                    {{ team.name }}
+                  </option>
+                  {% endfor %}
+                </select>
+              </div>
+              {% if gd.group_lock_at_utc %}
+              <div class="lock-countdown group-lock-countdown" data-lock-at="{{ gd.group_lock_at_utc.isoformat() }}">
+                🔒 Låser om: --
+              </div>
+              {% endif %}
+            </div>
+            <button type="submit" class="btn btn-sm btn-primary" {% if gd.group_locked %}disabled{% endif %}>Lagre</button>
+          </form>
+        </div>
+
+        <!-- Group standings table -->
+        {% if gd.standings %}
+        <div class="group-standings">
+          <table class="standings-table">
+            <thead>
+              <tr><th>Lag</th><th>S</th><th>V</th><th>U</th><th>T</th><th>MF</th><th>MS</th><th>+/-</th><th>P</th><th>Pos</th></tr>
+            </thead>
+            <tbody>
+              {% for s in gd.standings %}
+              <tr {% if loop.index <= 2 %}class="standing-qualified"{% elif loop.index == 3 %}class="standing-third"{% endif %}>
+                <td>{{ s.team.name if s.team else '-' }}</td>
+                <td>{{ s.played }}</td>
+                <td>{{ s.wins }}</td>
+                <td>{{ s.draws }}</td>
+                <td>{{ s.losses }}</td>
+                <td>{{ s.goals_for }}</td>
+                <td>{{ s.goals_against }}</td>
+                <td>{{ s.goal_difference }}</td>
+                <td><strong>{{ s.points }}</strong></td>
+                <td><strong>{{ s.rank or '-' }}</strong></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+        <!-- Match cards -->
+        <div class="match-grid">
+          {% for match in gd.matches %}
+          {% set pred = gd.predictions.get(match.id) %}
+          {% set status_class = '' %}
+          {% if match.is_finished %}
+            {% if pred and pred.predicted_home_score is not none %}
+              {% if pred.predicted_home_score == match.home_score and pred.predicted_away_score == match.away_score %}
+                {% set status_class = 'match-exact' %}
+              {% elif pred.predicted_hub %}
+                {% if pred.predicted_hub == ('H' if match.home_score > match.away_score else ('U' if match.home_score == match.away_score else 'B')) %}
+                  {% set status_class = 'match-hub' %}
+                {% else %}
+                  {% set status_class = 'match-wrong' %}
+                {% endif %}
+              {% else %}
+                {% set status_class = 'match-wrong' %}
+              {% endif %}
+            {% else %}
+              {% set status_class = 'match-finished' %}
+            {% endif %}
+          {% elif match.effective_locked %}
+            {% set status_class = 'match-locked' %}
+          {% elif pred %}
+            {% set status_class = 'match-predicted' %}
+          {% else %}
+            {% set status_class = 'match-open' %}
+          {% endif %}
+
+          <div class="match-card {{ status_class }}">
+            <div class="match-meta">
+              <span class="match-number">#{{ match.match_number }}</span>
+              {% if match.kickoff_at_oslo %}
+              <span class="match-time">{{ match.kickoff_at_utc | oslo_time }}</span>
+              {% endif %}
+              {% if match.venue %}<span class="match-venue">{{ match.venue }}</span>{% endif %}
+            </div>
+
+            {% if not match.is_finished and match.effective_lock_at_utc and not match.effective_locked %}
+            <div class="lock-countdown" data-lock-at="{{ match.effective_lock_at_utc.isoformat() }}">🔒 Låser om: --</div>
+            {% endif %}
+
+            <div class="match-teams">
+              <span class="team-name">{{ match.home_team.name if match.home_team else match.home_slot_source }}</span>
+              <div class="match-score-display">
+                {% if match.is_finished %}
+                  <span class="score-badge">{{ match.home_score }}–{{ match.away_score }}</span>
+                {% else %}
+                  <span class="vs-badge">VS</span>
+                {% endif %}
+              </div>
+              <span class="team-name">{{ match.away_team.name if match.away_team else match.away_slot_source }}</span>
+            </div>
+
+            {% if pred and pred.predicted_home_score is not none %}
+            <div class="user-prediction">
+              <span class="pred-label">Ditt tips:</span>
+              <span class="pred-score">{{ pred.predicted_home_score }}–{{ pred.predicted_away_score }}</span>
+              <span class="pred-hub hub-{{ pred.predicted_hub }}">{{ pred.predicted_hub }}</span>
+            </div>
+            {% endif %}
+
+            {% if match.is_open_for_betting %}
+            <form method="POST" action="{{ url_for('user.predict_match', match_id=match.id) }}" class="predict-form">
+              <div class="score-inputs">
+                <input type="number" name="home_score" min="0" max="20" placeholder="0"
+                  value="{{ pred.predicted_home_score if pred and pred.predicted_home_score is not none else '' }}"
+                  class="score-input hub-home" required>
+                <span class="score-sep">–</span>
+                <input type="number" name="away_score" min="0" max="20" placeholder="0"
+                  value="{{ pred.predicted_away_score if pred and pred.predicted_away_score is not none else '' }}"
+                  class="score-input hub-away" required>
+              </div>
+              <div class="hub-selector">
+                <input type="radio" name="hub" id="hub-H-{{ match.id }}" value="H" class="hub-radio" {% if pred and pred.predicted_hub == 'H' %}checked{% endif %}>
+                <label for="hub-H-{{ match.id }}" class="hub-btn">H</label>
+                <input type="radio" name="hub" id="hub-U-{{ match.id }}" value="U" class="hub-radio" {% if pred and pred.predicted_hub == 'U' %}checked{% endif %}>
+                <label for="hub-U-{{ match.id }}" class="hub-btn">U</label>
+                <input type="radio" name="hub" id="hub-B-{{ match.id }}" value="B" class="hub-radio" {% if pred and pred.predicted_hub == 'B' %}checked{% endif %}>
+                <label for="hub-B-{{ match.id }}" class="hub-btn">B</label>
+              </div>
+              <button type="submit" class="btn btn-sm btn-save">Lagre</button>
+            </form>
+            {% elif match.effective_locked and not match.is_finished %}
+            <div class="match-status-label">🔒 Låst</div>
+            {% endif %}
+            {% if match.is_finished and match_points is defined %}
+              {% set mp = match_points.get(match.id) %}
+              {% if mp is not none %}
+                {% if mp > 0 %}
+                  <div class="match-points-badge pts-positive">+{{ mp }} p</div>
+                {% else %}
+                  <div class="match-points-badge pts-zero">0 p</div>
+                {% endif %}
+              {% endif %}
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">
+        <p>Ingen gruppekamper er lagt inn ennå. Kom tilbake snart!</p>
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- TAB: KNOCKOUT -->
+  {% if active_tab == 'knockout' %}
+  <div class="tab-content">
+    {% set round_labels = {
+      'round_of_32': 'Round of 32',
+      'round_of_16': 'Åttendedelsfinale',
+      'quarter_final': 'Kvartfinale',
+      'semi_final': 'Semifinale',
+      'third_place': 'Bronsefinale',
+      'final': '🏆 Finale'
+    } %}
+    {% if rounds %}
+      {% for rn in round_order %}
+        {% if rn in rounds %}
+        <div class="knockout-round">
+          <h3 class="round-title">{{ round_labels.get(rn, rn) }}</h3>
+          <div class="match-grid">
+            {% for md in rounds[rn] %}
+            {% set match = md.match %}
+            {% set pred = md.prediction %}
+            <div class="match-card {% if match.is_finished %}match-finished{% elif not match.is_open_for_betting %}match-locked{% elif pred %}match-predicted{% else %}match-open{% endif %}">
+              <div class="match-meta">
+                <span class="match-number">#{{ match.match_number }}</span>
+                {% if match.kickoff_at_utc %}
+                <span class="match-time">{{ match.kickoff_at_utc | oslo_time }}</span>
+                {% endif %}
+              </div>
+
+              {% if not match.is_finished and match.effective_lock_at_utc and not match.effective_locked %}
+              <div class="lock-countdown" data-lock-at="{{ match.effective_lock_at_utc.isoformat() }}">🔒 Låser om: --</div>
+              {% endif %}
+
+              <div class="match-teams">
+                {% if match.home_team %}
+                <span class="team-name">{{ match.home_team.name }}</span>
+                {% else %}
+                <span class="team-name tbd">{{ match.home_slot_source or 'TBD' }}</span>
+                {% endif %}
+
+                <div class="match-score-display">
+                  {% if match.is_finished %}
+                  <span class="score-badge">{{ match.home_score }}–{{ match.away_score }}</span>
+                  {% elif not match.home_team_id or not match.away_team_id %}
+                  <span class="waiting-badge">⏳</span>
+                  {% else %}
+                  <span class="vs-badge">VS</span>
+                  {% endif %}
+                </div>
+
+                {% if match.away_team %}
+                <span class="team-name">{{ match.away_team.name }}</span>
+                {% else %}
+                <span class="team-name tbd">{{ match.away_slot_source or 'TBD' }}</span>
+                {% endif %}
+              </div>
+
+              {% if match.is_finished and match.advanced_team %}
+              <div class="advanced-label">✅ Videre: <strong>{{ match.advanced_team.name }}</strong></div>
+              {% endif %}
+
+              {% if pred and pred.predicted_home_score is not none %}
+              <div class="user-prediction">
+                <span class="pred-label">Ditt tips:</span>
+                <span class="pred-score">{{ pred.predicted_home_score }}–{{ pred.predicted_away_score }}</span>
+                {% if pred.predicted_advanced_team %}
+                <span class="pred-adv">Videre: {{ pred.predicted_advanced_team.name }}</span>
+                {% endif %}
+              </div>
+              {% endif %}
+
+              {% if match.is_open_for_betting %}
+              <form method="POST" action="{{ url_for('user.predict_knockout', match_id=match.id) }}" class="predict-form">
+                <div class="score-inputs">
+                  <input type="number" name="home_score" min="0" max="20" placeholder="0"
+                    value="{{ pred.predicted_home_score if pred and pred.predicted_home_score is not none else '' }}"
+                    class="score-input hub-home" required>
+                  <span class="score-sep">–</span>
+                  <input type="number" name="away_score" min="0" max="20" placeholder="0"
+                    value="{{ pred.predicted_away_score if pred and pred.predicted_away_score is not none else '' }}"
+                    class="score-input hub-away" required>
+                  <span class="hub-live pred-hub">?</span>
+                </div>
+                <div class="form-group">
+                  <label>Lag videre:</label>
+                  <select name="advanced_team_id" class="form-select" required>
+                    <option value="">Velg lag videre</option>
+                    {% if match.home_team %}
+                    <option value="{{ match.home_team_id }}"
+                      {% if pred and pred.predicted_advanced_team_id == match.home_team_id %}selected{% endif %}>
+                      {{ match.home_team.name }}
+                    </option>
+                    {% endif %}
+                    {% if match.away_team %}
+                    <option value="{{ match.away_team_id }}"
+                      {% if pred and pred.predicted_advanced_team_id == match.away_team_id %}selected{% endif %}>
+                      {{ match.away_team.name }}
+                    </option>
+                    {% endif %}
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-sm btn-save">Lagre</button>
+              </form>
+              {% elif not match.home_team_id or not match.away_team_id %}
+              <div class="match-status-label">⏳ Venter på lag</div>
+              {% elif not match.kickoff_at_utc %}
+              <div class="match-status-label">📅 Mangler kampstart</div>
+              {% elif match.effective_locked and not match.is_finished %}
+              <div class="match-status-label">🔒 Låst</div>
+              {% endif %}
+              {% if match.is_finished and match_points is defined %}
+                {% set mp = match_points.get(match.id) %}
+                {% if mp is not none %}
+                  {% if mp > 0 %}
+                    <div class="match-points-badge pts-positive">+{{ mp }} p</div>
+                  {% else %}
+                    <div class="match-points-badge pts-zero">0 p</div>
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">
+        <p>Sluttspillkamper vises her etter hvert som gruppespillet er ferdig.</p>
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- TAB: STATS -->
+  {% if active_tab == 'stats' %}
+  <div class="tab-content">
+    <div class="stats-grid">
+      <!-- My stats card -->
+      <div class="stats-card">
+        <h3>🏅 Mine poeng</h3>
+        <div class="big-number">{{ total_points }}</div>
+        <div class="sub-label">Plassering: {{ user_rank }}. plass</div>
+        {% if comp_stats %}
+        <div class="sub-label">Avstand til toppen: {{ (comp_stats.max_points - total_points) if comp_stats.max_points else 0 }} poeng</div>
+        {% endif %}
+      </div>
+
+      <!-- Prize pool card -->
+      <div class="stats-card">
+        <h3>💰 Premiepott</h3>
+        <div class="big-number">{{ prize_pool }} kr</div>
+        <div class="sub-label">{{ prize_summary.participants if prize_summary else 0 }} deltagere</div>
+      </div>
+    </div>
+
+    <!-- Score breakdown -->
+    {% if breakdown %}
+    <div class="breakdown-card">
+      <h3>📊 Poengfordeling</h3>
+      {% set score_labels = {
+        'group_hub': 'Riktig HUB (gruppespill)',
+        'group_exact': 'Eksakt resultat (gruppespill)',
+        'group_winner': 'Riktig gruppevinner',
+        'group_second': 'Riktig andreplass',
+        'group_advance': 'Riktig lag videre fra gruppe',
+        'knockout_exact': 'Eksakt resultat (sluttspill)',
+        'knockout_advance': 'Riktig lag videre (sluttspill)',
+        'knockout_finalist': 'Riktig finalist',
+        'knockout_champion': 'Riktig verdensmester',
+      } %}
+      <table class="breakdown-table">
+        {% for key, label in score_labels.items() %}
+        <tr>
+          <td>{{ label }}</td>
+          <td class="points-cell">{{ breakdown.get(key, 0) }} p</td>
+        </tr>
+        {% endfor %}
+        <tr class="total-row">
+          <td><strong>Totalt</strong></td>
+          <td class="points-cell"><strong>{{ total_points }}</strong></td>
+        </tr>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- User statistics -->
+    {% if user_stats %}
+    <div class="breakdown-card">
+      <h3>📈 Min statistikk</h3>
+      <table class="breakdown-table">
+        <tr><td>Riktige HUB</td><td>{{ user_stats.correct_hub }}</td></tr>
+        <tr><td>Eksakte resultater (gruppe)</td><td>{{ user_stats.correct_exact_group }}</td></tr>
+        <tr><td>Eksakte resultater (sluttspill)</td><td>{{ user_stats.correct_exact_knockout }}</td></tr>
+        <tr><td>Riktige gruppevinnere</td><td>{{ user_stats.correct_group_winners }}</td></tr>
+        <tr><td>Riktige lag videre (sluttspill)</td><td>{{ user_stats.correct_advance }}</td></tr>
+        <tr><td>Perfekte tips totalt</td><td>{{ user_stats.perfect_total }}</td></tr>
+        <tr><td>Treffprosent</td><td>{{ user_stats.hit_rate }}%</td></tr>
+        <tr><td>Gjensnittlig poeng per kamp</td><td>{{ user_stats.avg_points_per_match }}</td></tr>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- General statistics -->
+    {% if comp_stats %}
+    <div class="breakdown-card">
+      <h3>🌍 Generell statistikk</h3>
+      <table class="breakdown-table">
+        <tr><td>Gjennomsnittspoeng</td><td>{{ comp_stats.avg_points }}</td></tr>
+        <tr><td>Høyeste poengsum</td><td>{{ comp_stats.max_points }}</td></tr>
+        <tr><td>Laveste poengsum</td><td>{{ comp_stats.min_points }}</td></tr>
+        <tr><td>Medianpoeng</td><td>{{ comp_stats.median_points }}</td></tr>
+        <tr><td>Ferdigspilte kamper</td><td>{{ comp_stats.total_finished }}</td></tr>
+        <tr><td>Kamper som mangler resultat</td><td>{{ comp_stats.total_unfinished }}</td></tr>
+        <tr><td>Brukere med gruppetips</td><td>{{ comp_stats.users_with_group_preds }}</td></tr>
+        <tr><td>Brukere med sluttspilltips</td><td>{{ comp_stats.users_with_ko_preds }}</td></tr>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Scoreboard -->
+    {% if scoreboard %}
+    <div class="scoreboard-card">
+      <h3>🏆 Scoreboard</h3>
+      <table class="scoreboard-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Spiller</th>
+            <th>Poeng</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in scoreboard %}
+          <tr class="{{ 'my-row' if entry.user.id == user.id else '' }}">
+            <td>{{ entry.rank }}</td>
+            <td>
+              {% if entry.user.id == user.id %}
+                <strong>{{ entry.user.name }} (deg)</strong>
+              {% else %}
+                {{ entry.user.anonymous_label or ('Spiller ' ~ loop.index) }}
+              {% endif %}
+            </td>
+            <td class="points-cell">{{ entry.points }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+// ── HUB live indicator ──────────────────────────────────────
+document.querySelectorAll('.predict-form').forEach(function(form) {
+  var homeInput = form.querySelector('.hub-home');
+  var awayInput = form.querySelector('.hub-away');
+  var hubSpan   = form.querySelector('.hub-live');
+  var hubSelector = form.querySelector('.hub-selector');
+  if (!homeInput || !awayInput) return;
+  function updateHub() {
+    var h = parseInt(homeInput.value, 10);
+    var a = parseInt(awayInput.value, 10);
+    if (isNaN(h) || isNaN(a)) {
+      if (hubSpan) { hubSpan.textContent = '?'; hubSpan.className = 'hub-live pred-hub'; }
+      return;
+    }
+    var hub = h > a ? 'H' : (h === a ? 'U' : 'B');
+    if (hubSpan) {
+      hubSpan.textContent = hub;
+      hubSpan.className = 'hub-live pred-hub hub-' + hub;
+    }
+    if (hubSelector) {
+      var radio = hubSelector.querySelector('input[value="' + hub + '"]');
+      if (radio) radio.checked = true;
+    }
+  }
+  homeInput.addEventListener('input', updateHub);
+  awayInput.addEventListener('input', updateHub);
+  updateHub();
+});
+
+// ── AJAX form submission (no page jump) ────────────────────
+document.addEventListener('submit', function(e) {
+  var form = e.target;
+  if (!form.classList.contains('predict-form') && !form.classList.contains('group-pred-form')) return;
+  e.preventDefault();
+
+  var btn = form.querySelector('button[type="submit"]');
+  var origText = btn ? btn.textContent : '';
+  if (btn) btn.disabled = true;
+
+  var data = new FormData(form);
+  fetch(form.action, {
+    method: 'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    body: data
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(res) {
+    if (res.ok) {
+      if (btn) {
+        btn.textContent = 'Lagre';
+        btn.style.background = '#16a34a';
+        setTimeout(function() {
+          btn.textContent = origText;
+          btn.style.background = '';
+          btn.disabled = false;
+        }, 1500);
+      }
+    } else {
+      if (btn) { btn.textContent = origText; btn.disabled = false; }
+      alert(res.error || 'Noe gikk galt.');
+    }
+  })
+  .catch(function() {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  });
+});
+
+// ── Group lock countdown (24h before kickoff) ───────────────
+function formatCountdown(ms) {
+  if (ms <= 0) return 'Låst';
+  var totalSec = Math.floor(ms / 1000);
+  var days = Math.floor(totalSec / 86400);
+  var hours = Math.floor((totalSec % 86400) / 3600);
+  var mins = Math.floor((totalSec % 3600) / 60);
+  var secs = totalSec % 60;
+  if (days > 0) return days + 'd ' + hours + 't ' + mins + 'm';
+  return String(hours).padStart(2, '0') + ':' + String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+}
+
+function updateLockCountdowns() {
+  var now = Date.now();
+  document.querySelectorAll('.lock-countdown[data-lock-at]').forEach(function(el) {
+    var lockAt = Date.parse(el.getAttribute('data-lock-at') + 'Z');
+    if (!lockAt || Number.isNaN(lockAt)) {
+      el.textContent = '🔒 Låser snart';
+      return;
+    }
+    var diff = lockAt - now;
+    if (diff <= 0) {
+      el.textContent = '🔒 Låst';
+      return;
+    }
+    el.textContent = '🔒 Låser om: ' + formatCountdown(diff);
+  });
+}
+
+updateLockCountdowns();
+setInterval(updateLockCountdowns, 1000);
+</script>
+{% endblock %}

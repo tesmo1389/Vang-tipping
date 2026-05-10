@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin innlogging - VM 2026 Tipping</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="join-page">
+    <div class="join-card">
+      <div class="join-header">
+        <div class="join-icon">🔐</div>
+        <h1>Admin</h1>
+        <p>VM 2026 Tipping - Administrasjon</p>
+      </div>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+          <div class="flash flash-{{ cat }}">{{ msg }}</div>
+        {% endfor %}
+      {% endwith %}
+      <form method="POST" class="join-form">
+        <div class="form-group">
+          <label for="username">Brukernavn</label>
+          <input type="text" id="username" name="username" required class="form-input" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Passord</label>
+          <input type="password" id="password" name="password" required class="form-input" autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-large">Logg inn</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

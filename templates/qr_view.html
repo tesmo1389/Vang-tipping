@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}QR-kode - VM 2026 Tipping{% endblock %}
+{% block content %}
+<div class="join-page">
+  <div class="join-card">
+    <div class="join-header">
+      <h2>QR-kode for invitasjon</h2>
+      <p><a href="{{ join_url }}" target="_blank">{{ join_url }}</a></p>
+    </div>
+    <div style="text-align:center; padding: 20px;">
+      <img src="data:image/png;base64,{{ qr_b64 }}" alt="QR-kode" style="max-width: 300px; width: 100%; border: 1px solid #eee; border-radius: 8px;">
+    </div>
+    <div style="text-align:center;">
+      <p>Opprettet: {{ invite.created_at.strftime('%d.%m.%Y %H:%M') if invite.created_at else '-' }}</p>
+      {% if invite.used_by_user %}
+      <p>Brukt av: {{ invite.used_by_user.name }}</p>
+      {% else %}
+      <p>Ikke brukt ennå</p>
+      {% endif %}
+    </div>
+    <div style="text-align:center; margin-top: 16px;">
+      <a href="{{ url_for('admin.tab', tab='qr') }}" class="btn btn-outline">← Tilbake til admin</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

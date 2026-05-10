@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Registrer deg - VM 2026 Tipping{% endblock %}
+{% block content %}
+<div class="join-page">
+  <div class="join-card">
+    <div class="join-header">
+      <div class="join-icon">⚽</div>
+      <h1>VM 2026 Tipping</h1>
+      <p>Registrer deg for å delta i tippekonkurransen!</p>
+    </div>
+    <form method="POST" action="{{ url_for('user.join_post', token=token) }}" class="join-form">
+      <div class="form-group">
+        <label for="name">Fullt navn *</label>
+        <input type="text" id="name" name="name" required placeholder="Ditt navn" class="form-input">
+      </div>
+      <div class="form-group">
+        <label for="email">E-post (valgfritt)</label>
+        <input type="email" id="email" name="email" placeholder="din@epost.no" class="form-input">
+      </div>
+      <button type="submit" class="btn btn-primary btn-large">Registrer meg og start tipping →</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
