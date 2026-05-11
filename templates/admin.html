@@ -280,6 +280,14 @@
       <button type="submit" class="btn btn-primary">+ Generer ny invitasjon</button>
     </form>
 
+    <div class="admin-card" style="margin-top:12px;">
+      <h3>PDF med flere QR-koder</h3>
+      <form method="POST" action="{{ url_for('admin.generate_invite_pdf') }}" class="inline-form">
+        <input type="number" name="count" min="1" max="200" value="10" class="form-input short">
+        <button type="submit" class="btn btn-primary">Generer PDF</button>
+      </form>
+    </div>
+
     <table class="admin-table">
       <thead>
         <tr><th>Opprettet</th><th>Token (kort)</th><th>Brukt</th><th>Bruker</th><th>Aktiv</th><th>Handling</th></tr>

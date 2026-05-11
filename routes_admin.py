@@ -10,6 +10,9 @@ from flask import (
     Blueprint, render_template, request, redirect, url_for,
     session, flash, send_file, abort, jsonify
 )
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 from models import (
     db, User, InviteToken, Match, Group, Team, GroupStanding,
     ThirdPlaceRanking, CompetitionSetting, ScoreSetting,
@@ -782,6 +785,69 @@ def generate_invite():
     db.session.commit()
     flash("Ny invitasjon generert.", "success")
     return redirect(url_for("admin.tab", tab="qr"))
+
+
+@admin_bp.route("/invite/bulk/pdf", methods=["POST"])
+def generate_invite_pdf():
+    if not admin_required():
+        abort(403)
+
+    try:
+        count = int(request.form.get("count", "1"))
+    except (ValueError, TypeError):
+        count = 1
+
+    count = max(1, min(count, 200))
+
+    base_url = request.host_url.rstrip("/")
+    tokens = []
+    for _ in range(count):
+        token = secrets.token_urlsafe(32)
+        invite = InviteToken(token=token)
+        db.session.add(invite)
+        tokens.append(token)
+    db.session.commit()
+
+    buf = io.BytesIO()
+    pdf = canvas.Canvas(buf, pagesize=A4)
+    page_w, page_h = A4
+
+    for token in tokens:
+        join_url = f"{base_url}/join/{token}"
+        qr_img = qrcode.make(join_url)
+        qr_buf = io.BytesIO()
+        qr_img.save(qr_buf, format="PNG")
+        qr_buf.seek(0)
+        qr_reader = ImageReader(qr_buf)
+
+        qr_size = 320
+        qr_x = (page_w - qr_size) / 2
+        qr_y = (page_h - qr_size) / 2 + 80
+
+        pdf.setFont("Helvetica-Bold", 16)
+        pdf.drawCentredString(page_w / 2, page_h - 80, "Invitasjon til VM 2026 Tipping")
+
+        pdf.drawImage(qr_reader, qr_x, qr_y, width=qr_size, height=qr_size)
+
+        pdf.setFont("Helvetica", 10)
+        pdf.drawCentredString(page_w / 2, qr_y - 24, "Skann QR-koden for å delta")
+        pdf.setFont("Helvetica", 8)
+        pdf.drawCentredString(page_w / 2, qr_y - 40, join_url)
+
+        pdf.showPage()
+
+    pdf.save()
+    buf.seek(0)
+
+    db.session.add(AdminAuditLog(action="generate_invite_pdf", details=f"Count: {count}"))
+    db.session.commit()
+
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="invitasjoner_qr.pdf",
+    )
 
 
 @admin_bp.route("/invite/<int:invite_id>/qr")

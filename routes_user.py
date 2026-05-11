@@ -1,9 +1,14 @@
 """
 routes_user.py - Brukerrouter for VM 2026 tipping.
 """
+import io
 import secrets
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, render_template, request, redirect, url_for, session, flash, abort
+from flask import Blueprint, render_template, request, redirect, url_for, session, flash, abort, send_file
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from models import (
     db, User, InviteToken, Match, Group, Team, UserPrediction, GroupPrediction,
     GroupStanding, CompetitionSetting, ScoreCache, now_utc
@@ -11,7 +16,7 @@ from models import (
 from scoring import (
     get_user_total_points, get_scoreboard, get_user_score_breakdown,
     recalculate_all_scores, recalculate_user_scores, get_per_match_points,
-    get_prize_pool_summary, SCORE_KEYS
+    get_prize_pool_summary, SCORE_KEYS, calc_hub
 )
 from statistics import get_user_statistics, get_competition_statistics
 import pytz
@@ -96,7 +101,7 @@ def index():
         group_kickoffs = [m.kickoff_at_utc for m in matches if m.kickoff_at_utc]
         group_first_kickoff = min(group_kickoffs) if group_kickoffs else None
         group_lock_at_utc = group_first_kickoff - timedelta(hours=1) if group_first_kickoff else None
-        group_locked = bool(group_lock_at_utc and now_utc() >= group_lock_at_utc)
+        group_locked = any(m.is_finished for m in matches)
 
         match_preds = {}
         for match in matches:
@@ -216,10 +221,8 @@ def predict_group(group_id):
     group = Group.query.get_or_404(group_id)
 
     matches = Match.query.filter_by(group_id=group.id, phase="group").all()
-    group_kickoffs = [m.kickoff_at_utc for m in matches if m.kickoff_at_utc]
-    group_first_kickoff = min(group_kickoffs) if group_kickoffs else None
-    group_lock_at_utc = group_first_kickoff - timedelta(hours=1) if group_first_kickoff else None
-    if group_lock_at_utc and now_utc() >= group_lock_at_utc:
+    group_locked = any(m.is_finished for m in matches)
+    if group_locked:
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             from flask import jsonify
             return jsonify({"ok": False, "error": "Gruppetips er låst for denne gruppen."})
@@ -361,4 +364,92 @@ def stats():
         comp_name=comp_name,
         score_keys=SCORE_KEYS,
         active_tab="stats",
+    )
+
+
+@user_bp.route("/export/pdf")
+def export_user_pdf():
+    user = get_current_user()
+    if not user:
+        abort(403)
+
+    match_preds = (
+        db.session.query(UserPrediction, Match)
+        .join(Match, UserPrediction.match_id == Match.id)
+        .filter(UserPrediction.user_id == user.id)
+        .order_by(Match.match_number)
+        .all()
+    )
+    group_preds = (
+        db.session.query(GroupPrediction, Group)
+        .join(Group, GroupPrediction.group_id == Group.id)
+        .filter(GroupPrediction.user_id == user.id)
+        .order_by(Group.name)
+        .all()
+    )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, title="Min tipping")
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph(f"Min tipping - {user.name}", styles["Title"]))
+    story.append(Paragraph(f"Eksportert: {now_utc().strftime('%d.%m.%Y %H:%M')}", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    if group_preds:
+        story.append(Paragraph("Gruppetips", styles["Heading2"]))
+        data = [["Gruppe", "Vinner", "Andreplass"]]
+        for gp, group in group_preds:
+            data.append([
+                group.name,
+                gp.predicted_winner.name if gp.predicted_winner else "-",
+                gp.predicted_second.name if gp.predicted_second else "-",
+            ])
+        table = Table(data, hAlign="LEFT")
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 12))
+
+    if match_preds:
+        story.append(Paragraph("Kamper (tips og resultat)", styles["Heading2"]))
+        data = [["#", "Fase", "Kamp", "Resultat", "Tips", "HUB"]]
+        for pred, match in match_preds:
+            pred_hub = pred.predicted_hub
+            if pred_hub is None and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+                pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+            actual_hub = None
+            if match.home_score is not None and match.away_score is not None:
+                actual_hub = calc_hub(match.home_score, match.away_score)
+            data.append([
+                str(match.match_number),
+                "Gruppe" if match.phase == "group" else "Sluttspill",
+                f"{match.home_team.name if match.home_team else (match.home_slot_source or '-')} vs {match.away_team.name if match.away_team else (match.away_slot_source or '-')}",
+                (
+                    f"{match.home_score}–{match.away_score}"
+                    if match.home_score is not None and match.away_score is not None else "-"
+                ),
+                (
+                    f"{pred.predicted_home_score}–{pred.predicted_away_score}"
+                    if pred.predicted_home_score is not None and pred.predicted_away_score is not None else "-"
+                ),
+                f"{pred_hub or '-'} / {actual_hub or '-'}",
+            ])
+        table = Table(data, hAlign="LEFT", colWidths=[28, 55, 200, 55, 45, 55])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ]))
+        story.append(table)
+
+    doc.build(story)
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="min_tipping.pdf",
     )
