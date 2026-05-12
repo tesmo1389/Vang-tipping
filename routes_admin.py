@@ -11,6 +11,7 @@ from flask import (
     session, flash, send_file, abort, jsonify
 )
 from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from models import (
@@ -820,19 +821,113 @@ def generate_invite_pdf():
         qr_buf.seek(0)
         qr_reader = ImageReader(qr_buf)
 
-        qr_size = 320
+        text_dark = colors.Color(0.1, 0.1, 0.1)
+        pdf.setFillColor(colors.white)
+        pdf.rect(0, 0, page_w, page_h, stroke=0, fill=1)
+
+        pdf.setFillColor(text_dark)
+        pdf.setFont("Helvetica-Bold", 22)
+        pdf.drawCentredString(page_w / 2, page_h - 60, "⚽ VM 2026 Tipping – Bli med!")
+        pdf.setStrokeColor(colors.Color(0.9, 0.9, 0.9))
+        pdf.setLineWidth(1)
+        pdf.line(60, page_h - 72, page_w - 60, page_h - 72)
+
+        content_left = 70
+        content_top = page_h - 110
+        line_height = 13
+
+        def draw_wrapped(text, x, y, font_name="Helvetica", font_size=10, max_width=460):
+            pdf.setFont(font_name, font_size)
+            words = text.split(" ")
+            line = ""
+            for word in words:
+                test_line = (line + " " + word).strip()
+                if pdf.stringWidth(test_line, font_name, font_size) <= max_width:
+                    line = test_line
+                else:
+                    pdf.drawString(x, y, line)
+                    y -= line_height
+                    line = word
+            if line:
+                pdf.drawString(x, y, line)
+                y -= line_height
+            return y
+
+        y = content_top
+        pdf.setFillColor(text_dark)
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "🏆 Klar for fotballfest?")
+        y -= 18
+        y = draw_wrapped("Vi inviterer alle i Vangs til å bli med på årets VM-tipping!", content_left + 10, y)
+        y -= 6
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "💰 Innskudd")
+        y -= 18
+        y = draw_wrapped("- 250 kr per deltaker", content_left + 10, y)
+        y = draw_wrapped("- Vipps til Kristoffer – 92837510", content_left + 10, y)
+        y -= 6
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "📲 Slik blir du med")
+        y -= 18
+        y = draw_wrapped("1. Skann QR-koden nederst på siden", content_left + 10, y)
+        y = draw_wrapped("2. Logg inn med navn og e-post", content_left + 10, y)
+        y = draw_wrapped("3. Lag dine tips", content_left + 10, y)
+        y -= 4
+        y = draw_wrapped("👉 Koden er personlig – bruk samme hver gang du åpner siden.", content_left + 10, y)
+        y -= 6
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "🎯 Dette tipper du")
+        y -= 18
+        y = draw_wrapped("- Gruppespill", content_left + 10, y)
+        y = draw_wrapped("- Sluttspill", content_left + 10, y)
+        y = draw_wrapped("- Resultater", content_left + 10, y)
+        y -= 6
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "✅ Du kan:")
+        y -= 18
+        y = draw_wrapped("- Tippe vinner og andreplass i gruppe frem til 24 timer før første kamp", content_left + 10, y)
+        y = draw_wrapped("- Tippe enkeltkamper frem til 24 timer før avspark", content_left + 10, y)
+        y -= 6
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "⚙️ Automatikk og justeringer")
+        y -= 18
+        y = draw_wrapped("- Sluttspill fylles automatisk basert på gruppespill", content_left + 10, y)
+        y = draw_wrapped("- Du kan endre dette selv hvis du ønsker", content_left + 10, y)
+        y = draw_wrapped("- Når gruppespillet er ferdig → fyll ut sluttspill manuelt", content_left + 10, y)
+        y -= 6
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "⏳ Viktig å huske")
+        y -= 18
+        y = draw_wrapped("- Tippingen stenger 24 timer før kampstart", content_left + 10, y)
+        y = draw_wrapped("- Også etter at resultatene er klare", content_left + 10, y)
+        y -= 4
+        y = draw_wrapped("👉 Sørg for å ha alt inne i tide!", content_left + 10, y)
+        y -= 8
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(content_left, y, "🚀 Klar?")
+        y -= 18
+        y = draw_wrapped("Skann QR-koden og bli med!", content_left + 10, y)
+
+        qr_size = 240
         qr_x = (page_w - qr_size) / 2
-        qr_y = (page_h - qr_size) / 2 + 80
-
-        pdf.setFont("Helvetica-Bold", 16)
-        pdf.drawCentredString(page_w / 2, page_h - 80, "Invitasjon til VM 2026 Tipping")
-
+        qr_y = 50
+        pdf.setFillColor(colors.white)
+        pdf.roundRect(qr_x - 10, qr_y - 10, qr_size + 20, qr_size + 20, 8, stroke=1, fill=1)
         pdf.drawImage(qr_reader, qr_x, qr_y, width=qr_size, height=qr_size)
 
-        pdf.setFont("Helvetica", 10)
-        pdf.drawCentredString(page_w / 2, qr_y - 24, "Skann QR-koden for å delta")
+        pdf.setFillColor(text_dark)
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawCentredString(page_w / 2, qr_y - 18, "Skann QR-koden for å delta")
         pdf.setFont("Helvetica", 8)
-        pdf.drawCentredString(page_w / 2, qr_y - 40, join_url)
+        pdf.drawCentredString(page_w / 2, qr_y - 32, join_url)
 
         pdf.showPage()
 
