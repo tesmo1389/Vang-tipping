@@ -656,6 +656,18 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
   .form-row { flex-direction: column; }
   .form-grid { grid-template-columns: 1fr; }
   .navbar-brand { font-size: 0.95rem; }
+  .group-position-grid {
+    grid-template-columns: 1fr;
+  }
+  .group-position-grid .position-row {
+    flex-wrap: wrap;
+  }
+  .group-position-grid .form-select {
+    width: 100%;
+  }
+  .group-lock-countdown {
+    justify-self: start;
+  }
 }
 
 @media (max-width: 380px) {
