@@ -270,12 +270,13 @@ def export_users_csv():
     from scoring import get_user_total_points
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["id", "name", "email", "created_at", "last_seen_at", "total_points", "is_active"])
+    writer.writerow(["id", "name", "email", "created_at", "last_seen_at", "total_points", "is_active", "has_paid"])
     for user in User.query.all():
         writer.writerow([
             user.id, user.name, user.email,
             user.created_at, user.last_seen_at,
             get_user_total_points(user.id),
-            user.is_active
+            user.is_active,
+            user.has_paid
         ])
     return buf.getvalue().encode("utf-8")

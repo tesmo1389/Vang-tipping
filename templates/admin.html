@@ -106,7 +106,7 @@
           <span class="match-teams-txt">
             {{ match.home_team.name if match.home_team else '?' }} vs {{ match.away_team.name if match.away_team else '?' }}
           </span>
-          {% if match.kickoff_at_oslo_cache %}<span class="match-time-txt">{{ match.kickoff_at_oslo_cache }}</span>{% endif %}
+          {% if match.kickoff_at_utc %}<span class="match-time-txt">{{ match.kickoff_at_utc | oslo_time }}</span>{% endif %}
 
           <form method="POST" action="{{ url_for('admin.save_match_result', match_id=match.id) }}" class="result-form">
             <input type="hidden" name="next_tab" value="groups">
@@ -158,7 +158,7 @@
       <div class="admin-knockout-card">
         <div class="match-header-row">
           <strong>#{{ match.match_number }}</strong>
-          {% if match.kickoff_at_oslo_cache %}<span>{{ match.kickoff_at_oslo_cache }}</span>{% endif %}
+          {% if match.kickoff_at_utc %}<span>{{ match.kickoff_at_utc | oslo_time }}</span>{% endif %}
           <span class="status-badge {% if match.is_finished %}badge-finished{% elif match.effective_locked %}badge-locked{% elif match.is_open_for_betting %}badge-open{% else %}badge-waiting{% endif %}">
             {% if match.is_finished %}Ferdig{% elif match.effective_locked %}Låst{% elif match.is_open_for_betting %}Åpen{% else %}Venter{% endif %}
           </span>
@@ -240,7 +240,7 @@
     {% if scoreboard %}
     <table class="admin-table">
       <thead>
-        <tr><th>#</th><th>Navn</th><th>E-post</th><th>Registrert</th><th>Sist aktiv</th><th>Poeng</th><th>Aktiv</th><th>Handling</th></tr>
+        <tr><th>#</th><th>Navn</th><th>E-post</th><th>Registrert</th><th>Sist aktiv</th><th>Poeng</th><th>Betalt</th><th>Aktiv</th><th>Handling</th></tr>
       </thead>
       <tbody>
         {% for entry in scoreboard %}
@@ -249,8 +249,9 @@
           <td>{{ entry.user.name }}</td>
           <td>{{ entry.user.email or '-' }}</td>
           <td>{{ entry.user.created_at.strftime('%d.%m.%Y') if entry.user.created_at else '-' }}</td>
-          <td>{{ entry.user.last_seen_at.strftime('%d.%m.%Y %H:%M') if entry.user.last_seen_at else '-' }}</td>
+          <td>{{ entry.user.last_seen_at.strftime('%d.%m.%Y') if entry.user.last_seen_at else '-' }}</td>
           <td><strong>{{ entry.points }}</strong></td>
+          <td>{{ '✅' if entry.user.has_paid else '❌' }}</td>
           <td>{{ '✅' if entry.user.is_active else '❌' }}</td>
           <td>
             <a href="{{ url_for('admin.user_detail', user_id=entry.user.id, tab='points') }}" class="btn btn-xs btn-outline">Detaljer</a>
@@ -259,6 +260,9 @@
               <button type="submit" class="btn btn-xs btn-danger" onclick="return confirm('Deaktivere bruker?')">Deaktiver</button>
             </form>
             {% endif %}
+            <form method="POST" action="{{ url_for('admin.toggle_paid', user_id=entry.user.id) }}" style="display:inline">
+              <button type="submit" class="btn btn-xs btn-outline">{{ 'Fjern betalt' if entry.user.has_paid else 'Sett betalt' }}</button>
+            </form>
           </td>
         </tr>
         {% endfor %}
@@ -295,7 +299,7 @@
       <tbody>
         {% for inv in invite_tokens %}
         <tr>
-          <td>{{ inv.created_at.strftime('%d.%m.%Y %H:%M') if inv.created_at else '-' }}</td>
+          <td>{{ inv.created_at.strftime('%d.%m.%Y') if inv.created_at else '-' }}</td>
           <td><code>{{ inv.token[:12] }}...</code></td>
           <td>{{ inv.used_at.strftime('%d.%m.%Y') if inv.used_at else '–' }}</td>
           <td>{{ inv.used_by_user.name if inv.used_by_user else '–' }}</td>
@@ -307,6 +311,9 @@
               <button type="submit" class="btn btn-xs btn-danger">Deaktiver</button>
             </form>
             {% endif %}
+            <form method="POST" action="{{ url_for('admin.delete_invite', invite_id=inv.id) }}" style="display:inline" onsubmit="return confirm('Slette denne invitasjonen?')">
+              <button type="submit" class="btn btn-xs btn-danger">Slett</button>
+            </form>
           </td>
         </tr>
         {% endfor %}
@@ -404,9 +411,14 @@
         <button type="submit" class="btn btn-danger">🗑️ Nullstill alle kamper</button>
       </form>
 
-      <p style="font-size:0.9rem;color:#6b7280;margin:16px 0 12px;">Nullstiller alle tips fra alle brukere (kamp- og gruppetips), samt poengcache.</p>
+      <p style="font-size:0.9rem;color:#6b7280;margin:16px 0 12px;">Nullstiller all tipping fra alle brukere (kamp- og gruppetipping), samt poengcache.</p>
       <form method="POST" action="{{ url_for('admin.reset_user_tips') }}" onsubmit="return confirm('Nullstille all tipping for alle brukere?')">
         <button type="submit" class="btn btn-danger">🧹 Nullstill all tipping</button>
+      </form>
+
+      <p style="font-size:0.9rem;color:#6b7280;margin:16px 0 12px;">Sletter alle brukere og tilhørende tipping/poeng. Invitasjoner beholdes, men tilknytning fjernes.</p>
+      <form method="POST" action="{{ url_for('admin.reset_users') }}" onsubmit="return confirm('Slette alle brukere? Dette kan ikke angres.')">
+        <button type="submit" class="btn btn-danger">👥 Slett alle brukere</button>
       </form>
     </div>
   </div>
@@ -439,8 +451,8 @@
         </thead>
         <tbody>
         {% for m in all_matches %}
-          {% set home_name = m.home_team.name if m.home_team else (m.home_slot or 'TBD') %}
-          {% set away_name = m.away_team.name if m.away_team else (m.away_slot or 'TBD') %}
+          {% set home_name = m.home_team.name if m.home_team else (m.home_slot_source or 'TBD') %}
+          {% set away_name = m.away_team.name if m.away_team else (m.away_slot_source or 'TBD') %}
           {% if m.is_finished %}
             {% set row_style = 'background:#f0fdf4' %}
           {% elif m.effective_locked %}

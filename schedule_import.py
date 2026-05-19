@@ -165,7 +165,7 @@ def import_schedule_from_csv(csv_content, dry_run=False):
                 pass
             elif kickoff_utc:
                 from datetime import timedelta
-                lock_at_utc = kickoff_utc - timedelta(hours=24) if kickoff_utc else None
+                lock_at_utc = kickoff_utc - timedelta(hours=1) if kickoff_utc else None
                 # Convert to naive UTC
                 if lock_at_utc and hasattr(lock_at_utc, 'tzinfo') and lock_at_utc.tzinfo:
                     lock_at_utc = lock_at_utc.replace(tzinfo=None)
@@ -225,17 +225,17 @@ def import_schedule_from_csv(csv_content, dry_run=False):
         return {"success": False, "errors": errors}
 
     if not dry_run:
-        # Set per-match group lock_at_utc: 24h before each group match kickoff
+        # Set per-match group lock_at_utc: 1h before each group match kickoff
         from datetime import timedelta
         group_matches = Match.query.filter_by(phase="group").all()
         for gm in group_matches:
             if gm.kickoff_at_utc:
-                gm.lock_at_utc = gm.kickoff_at_utc - timedelta(hours=24)
+                gm.lock_at_utc = gm.kickoff_at_utc - timedelta(hours=1)
 
         # Keep legacy setting for group-position tips lock (based on first group match)
         first_group = Match.query.filter_by(phase="group").order_by(Match.kickoff_at_utc).first()
         if first_group and first_group.kickoff_at_utc:
-            group_lock = first_group.kickoff_at_utc - timedelta(hours=24)
+            group_lock = first_group.kickoff_at_utc - timedelta(hours=1)
             lock_str = group_lock.strftime("%Y-%m-%dT%H:%M:%S")
             CompetitionSetting.set("group_stage_lock_at", lock_str)
 

@@ -80,9 +80,9 @@
           <thead>
             <tr>
               <th>Gruppe</th>
-              <th>Vinner (tips)</th>
+              <th>Vinner (tipping)</th>
               <th>Vinner (fasit)</th>
-              <th>Andreplass (tips)</th>
+              <th>Andreplass (tipping)</th>
               <th>Andreplass (fasit)</th>
               <th>Vinner</th>
               <th>Andre</th>
@@ -107,7 +107,7 @@
           </tbody>
         </table>
         {% else %}
-        <p>Ingen gruppetips registrert.</p>
+        <p>Ingen gruppetipping registrert.</p>
         {% endif %}
       </div>
 
@@ -120,7 +120,7 @@
               <th>#</th>
               <th>Kamp</th>
               <th>Fasit</th>
-              <th>Tips</th>
+              <th>Tipping</th>
               <th>HUB</th>
               <th>Poeng</th>
             </tr>
@@ -139,7 +139,7 @@
           </tbody>
         </table>
         {% else %}
-        <p>Ingen kamptips registrert i gruppespill.</p>
+        <p>Ingen kamptipping registrert i gruppespill.</p>
         {% endif %}
       </div>
 
@@ -152,8 +152,8 @@
               <th>#</th>
               <th>Kamp</th>
               <th>Fasit</th>
-              <th>Tips</th>
-              <th>Videre (tips)</th>
+              <th>Tipping</th>
+              <th>Videre (tipping)</th>
               <th>Videre (fasit)</th>
               <th>Poeng</th>
             </tr>
@@ -173,16 +173,16 @@
           </tbody>
         </table>
         {% else %}
-        <p>Ingen sluttspilltips registrert.</p>
+        <p>Ingen sluttspills-tipping registrert.</p>
         {% endif %}
       </div>
       <div class="admin-card">
-        <h3>Tips (alle)</h3>
+        <h3>Tipping (alle)</h3>
         <p class="admin-user-sub">Samlet oversikt over alt som er tippet.</p>
       </div>
 
       <div class="admin-card">
-        <h3>Gruppetips</h3>
+        <h3>Gruppetipping</h3>
         {% if group_rows %}
         <table class="admin-table">
           <thead>
@@ -203,12 +203,12 @@
           </tbody>
         </table>
         {% else %}
-        <p>Ingen gruppetips registrert.</p>
+        <p>Ingen gruppetipping registrert.</p>
         {% endif %}
       </div>
 
       <div class="admin-card">
-        <h3>Kamptips</h3>
+        <h3>Kamptipping</h3>
         {% if match_rows_group or match_rows_knockout %}
         <table class="admin-table">
           <thead>
@@ -216,7 +216,7 @@
               <th>#</th>
               <th>Fase</th>
               <th>Kamp</th>
-              <th>Tips</th>
+              <th>Tipping</th>
               <th>HUB</th>
               <th>Videre</th>
             </tr>
@@ -245,7 +245,7 @@
           </tbody>
         </table>
         {% else %}
-        <p>Ingen kamptips registrert.</p>
+        <p>Ingen kamptipping registrert.</p>
         {% endif %}
       </div>
     </div>

@@ -90,9 +90,9 @@ class Match(db.Model):
         if not self.kickoff_at_utc:
             return None
         if self.phase == "group":
-            return self.kickoff_at_utc - timedelta(hours=24)
+            return self.kickoff_at_utc - timedelta(hours=1)
         if self.phase == "knockout":
-            return self.kickoff_at_utc - timedelta(hours=24)
+            return self.kickoff_at_utc - timedelta(hours=1)
         return None
 
     @property
@@ -137,6 +137,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=now_utc)
     last_seen_at = db.Column(db.DateTime, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    has_paid = db.Column(db.Boolean, default=False)
     anonymous_label = db.Column(db.String(50), nullable=True)  # "Spiller 1" etc.
 
     predictions = db.relationship("UserPrediction", back_populates="user", lazy="dynamic")

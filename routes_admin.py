@@ -52,6 +52,8 @@ def login():
         password = request.form.get("password", "")
         admin_user = os.environ.get("ADMIN_USERNAME", "admin")
         admin_pass = os.environ.get("ADMIN_PASSWORD", "admin123")
+        if admin_user == "admin" or admin_pass == "admin123":
+            flash("Advarsel: ADMIN_USERNAME/ADMIN_PASSWORD bruker standardverdier. Sett egne verdier i miljøvariabler.", "info")
         if username == admin_user and password == admin_pass:
             session["admin_logged_in"] = True
             db.session.add(AdminAuditLog(action="admin_login", details=f"Login: {username}"))
@@ -346,15 +348,15 @@ def user_predictions_pdf(user_id):
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     except Exception:
         flash("PDF-bibliotek mangler. Installer reportlab for PDF-eksport.", "error")
-        return redirect(url_for("admin.user_detail", user_id=user.id, tab="tips"))
+        return redirect(url_for("admin.user_detail", user_id=user.id, tab="tipping"))
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, title="Tipping - tips")
+    doc = SimpleDocTemplate(buf, pagesize=A4, title="Tipping - tipping")
     styles = getSampleStyleSheet()
     story = []
 
-    story.append(Paragraph(f"Tipping - tips for {user.name}", styles["Title"]))
-    story.append(Paragraph(f"Eksportert: {now_utc().strftime('%d.%m.%Y %H:%M')}", styles["Normal"]))
+    story.append(Paragraph(f"Tipping - tipping for {user.name}", styles["Title"]))
+    story.append(Paragraph(f"Eksportert: {datetime.now(OSLO_TZ).strftime('%d.%m.%Y')}", styles["Normal"]))
     story.append(Spacer(1, 12))
 
     story.append(Paragraph("Poengoversikt", styles["Heading2"]))
@@ -373,7 +375,7 @@ def user_predictions_pdf(user_id):
 
     if group_preds:
         story.append(Paragraph("Gruppeplasseringer (poeng)", styles["Heading2"]))
-        data = [["Gruppe", "Vinner (tips)", "Vinner (fasit)", "Andre (tips)", "Andre (fasit)", "Vinner", "Andre", "Videre", "Sum"]]
+        data = [["Gruppe", "Vinner (tipping)", "Vinner (fasit)", "Andre (tipping)", "Andre (fasit)", "Vinner", "Andre", "Videre", "Sum"]]
         for gp, group in group_preds:
             standings = GroupStanding.query.filter_by(group_id=group.id).all()
             ranked = sorted(standings, key=lambda s: s.rank or 99)
@@ -443,21 +445,21 @@ def user_predictions_pdf(user_id):
             else:
                 knockout_rows.append(row)
 
-        table_header = [["#", "Kamp", "Fasit", "Tips", "HUB", "Videre", "Poeng"]]
+        table_header = [["#", "Kamp", "Fasit", "Tipping", "HUB", "Videre", "Poeng"]]
         table_style = TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
             ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
         ])
 
         if group_rows:
-            story.append(Paragraph("Gruppespill (poeng og tips)", styles["Heading2"]))
+            story.append(Paragraph("Gruppespill (poeng og tipping)", styles["Heading2"]))
             table = Table(table_header + group_rows, hAlign="LEFT", colWidths=[28, 220, 45, 45, 60, 65, 40])
             table.setStyle(table_style)
             story.append(table)
             story.append(Spacer(1, 12))
 
         if knockout_rows:
-            story.append(Paragraph("Sluttspill (poeng og tips)", styles["Heading2"]))
+            story.append(Paragraph("Sluttspill (poeng og tipping)", styles["Heading2"]))
             table = Table(table_header + knockout_rows, hAlign="LEFT", colWidths=[28, 220, 45, 45, 60, 65, 40])
             table.setStyle(table_style)
             story.append(table)
@@ -468,7 +470,7 @@ def user_predictions_pdf(user_id):
         buf,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"tips_user_{user.id}.pdf"
+        download_name=f"tipping_user_{user.id}.pdf"
     )
 
 
@@ -530,9 +532,9 @@ def add_match():
     lock_utc = None
     if kickoff_utc:
         if phase == "group":
-            lock_utc = kickoff_utc - timedelta(hours=24)
+            lock_utc = kickoff_utc - timedelta(hours=1)
         elif phase == "knockout":
-            lock_utc = kickoff_utc - timedelta(hours=24)
+            lock_utc = kickoff_utc - timedelta(hours=1)
 
     match = Match(
         match_number=int(match_number) if match_number else 0,
@@ -574,7 +576,7 @@ def save_knockout_result(match_id):
             match.kickoff_at_utc = kickoff_utc
             match.kickoff_at_oslo_cache = kickoff_str.replace("T", " ")
             from datetime import timedelta
-            match.lock_at_utc = kickoff_utc - timedelta(hours=24)
+            match.lock_at_utc = kickoff_utc - timedelta(hours=1)
         except Exception:
             pass
 
@@ -662,6 +664,18 @@ def deactivate_user(user_id):
     return redirect(url_for("admin.tab", tab="users"))
 
 
+@admin_bp.route("/user/<int:user_id>/paid", methods=["POST"])
+def toggle_paid(user_id):
+    if not admin_required():
+        abort(403)
+    user = User.query.get_or_404(user_id)
+    user.has_paid = not bool(user.has_paid)
+    db.session.commit()
+    status = "registrert som betalt" if user.has_paid else "markert som ikke betalt"
+    flash(f"{user.name} er {status}.", "success")
+    return redirect(url_for("admin.tab", tab="users"))
+
+
 @admin_bp.route("/recalculate", methods=["POST"])
 def recalculate():
     if not admin_required():
@@ -729,6 +743,34 @@ def reset_user_tips():
     db.session.commit()
 
     flash("All tipping fra brukere er nullstilt.", "success")
+    return redirect(url_for("admin.tab", tab="settings"))
+
+
+@admin_bp.route("/reset-users", methods=["POST"])
+def reset_users():
+    if not admin_required():
+        abort(403)
+
+    # Remove all user data and related caches/predictions.
+    UserPrediction.query.delete()
+    GroupPrediction.query.delete()
+    ScoreCache.query.delete()
+    ScoreboardSnapshot.query.delete()
+
+    # Reset invite usage without deleting tokens.
+    InviteToken.query.update({
+        InviteToken.used_by_user_id: None,
+        InviteToken.used_at: None,
+    })
+
+    User.query.delete()
+
+    db.session.commit()
+
+    db.session.add(AdminAuditLog(action="reset_users", details="All users deleted by admin"))
+    db.session.commit()
+
+    flash("Alle brukere er slettet.", "success")
     return redirect(url_for("admin.tab", tab="settings"))
 
 
@@ -822,21 +864,34 @@ def generate_invite_pdf():
         qr_reader = ImageReader(qr_buf)
 
         text_dark = colors.Color(0.1, 0.1, 0.1)
+        accent = colors.Color(0.1, 0.32, 0.86)
+        light_bg = colors.Color(0.97, 0.98, 1.0)
+        box_border = colors.Color(0.86, 0.1, 0.1)
         pdf.setFillColor(colors.white)
         pdf.rect(0, 0, page_w, page_h, stroke=0, fill=1)
 
+        # Header band
+        pdf.setFillColor(accent)
+        pdf.rect(0, page_h - 105, page_w, 105, stroke=0, fill=1)
+        pdf.setFillColor(colors.white)
+        pdf.setFont("Helvetica-Bold", 24)
+        pdf.drawString(50, page_h - 66, "VM 2026 Tipping")
+        pdf.setFont("Helvetica", 11)
+        pdf.drawString(50, page_h - 86, "Bli med på en enkel og sosial VM-konkurranse")
+
         pdf.setFillColor(text_dark)
-        pdf.setFont("Helvetica-Bold", 22)
-        pdf.drawCentredString(page_w / 2, page_h - 60, "⚽ VM 2026 Tipping – Bli med!")
-        pdf.setStrokeColor(colors.Color(0.9, 0.9, 0.9))
-        pdf.setLineWidth(1)
-        pdf.line(60, page_h - 72, page_w - 60, page_h - 72)
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, page_h - 135, "Skann QR-koden nederst og bli med på 1 minutt")
 
-        content_left = 70
-        content_top = page_h - 110
-        line_height = 13
+        content_top = page_h - 165
+        col_left = 50
+        col_right = 310
+        col_width = 250
+        box_h = 88
+        gap = 10
+        line_height = 11
 
-        def draw_wrapped(text, x, y, font_name="Helvetica", font_size=10, max_width=460):
+        def draw_wrapped(text, x, y, font_name="Helvetica", font_size=9, max_width=220):
             pdf.setFont(font_name, font_size)
             words = text.split(" ")
             line = ""
@@ -853,81 +908,66 @@ def generate_invite_pdf():
                 y -= line_height
             return y
 
-        y = content_top
-        pdf.setFillColor(text_dark)
+        def draw_box(title, items, x, y):
+            pdf.setFillColor(light_bg)
+            pdf.setStrokeColor(box_border)
+            pdf.setLineWidth(1)
+            pdf.roundRect(x, y - box_h, col_width, box_h, 8, stroke=1, fill=1)
+            pdf.setFillColor(text_dark)
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawString(x + 12, y - 16, title)
+            text_y = y - 30
+            for item in items:
+                pdf.setFont("Helvetica", 9)
+                pdf.drawString(x + 14, text_y, "•")
+                text_y = draw_wrapped(item, x + 26, text_y, "Helvetica", 9, col_width - 34)
 
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "🏆 Klar for fotballfest?")
-        y -= 18
-        y = draw_wrapped("Vi inviterer alle i Vangs til å bli med på årets VM-tipping!", content_left + 10, y)
-        y -= 6
+        y_row1 = content_top
+        y_row2 = y_row1 - box_h - gap
+        y_row3 = y_row2 - box_h - gap
 
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "💰 Innskudd")
-        y -= 18
-        y = draw_wrapped("- 250 kr per deltaker", content_left + 10, y)
-        y = draw_wrapped("- Vipps til Kristoffer – 92837510", content_left + 10, y)
-        y -= 6
+        draw_box("Slik blir du med", [
+            "Skann QR-koden og logg inn med navn og e-post.",
+            "Lag din tipping for gruppespill og sluttspill.",
+            "Koden er personlig – bruk samme hver gang.",
+        ], col_left, y_row1)
+        draw_box("Innskudd", [
+            "250 kr per deltaker.",
+            "Vipps til Kristoffer – 92837510.",
+        ], col_right, y_row1)
 
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "📲 Slik blir du med")
-        y -= 18
-        y = draw_wrapped("1. Skann QR-koden nederst på siden", content_left + 10, y)
-        y = draw_wrapped("2. Logg inn med navn og e-post", content_left + 10, y)
-        y = draw_wrapped("3. Lag dine tips", content_left + 10, y)
-        y -= 4
-        y = draw_wrapped("👉 Koden er personlig – bruk samme hver gang du åpner siden.", content_left + 10, y)
-        y -= 6
+        draw_box("Dette tipper du", [
+            "Gruppespill: gruppevinner, andreplass, kampresultat og HUB.",
+            "Sluttspill: kampresultat og lag videre.",
+            "Sluttspillet blir klart fortløpende når gruppene blir ferdigspilt.",
+        ], col_left, y_row2)
+        draw_box("Regler", [
+            "All tipping stenger 1 time før avspark.",
+            "Gruppetipping låses 1 time før første kamp i gruppen.",
+            "Du kan endre tipping fram til lås.",
+        ], col_right, y_row2)
 
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "🎯 Dette tipper du")
-        y -= 18
-        y = draw_wrapped("- Gruppespill", content_left + 10, y)
-        y = draw_wrapped("- Sluttspill", content_left + 10, y)
-        y = draw_wrapped("- Resultater", content_left + 10, y)
-        y -= 6
+        draw_box("Poeng", [
+            "Poeng beregnes automatisk etter kampene.",
+            "Full oversikt ligger i appen under Resultater.",
+        ], col_left, y_row3)
+        draw_box("Viktig å huske", [
+            "Jo tidligere du tipper, jo bedre oversikt.",
+            "Alt er klart når du har lagret.",
+        ], col_right, y_row3)
 
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "✅ Du kan:")
-        y -= 18
-        y = draw_wrapped("- Tippe vinner og andreplass i gruppe frem til 24 timer før første kamp", content_left + 10, y)
-        y = draw_wrapped("- Tippe enkeltkamper frem til 24 timer før avspark", content_left + 10, y)
-        y -= 6
-
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "⚙️ Automatikk og justeringer")
-        y -= 18
-        y = draw_wrapped("- Sluttspill fylles automatisk basert på gruppespill", content_left + 10, y)
-        y = draw_wrapped("- Du kan endre dette selv hvis du ønsker", content_left + 10, y)
-        y = draw_wrapped("- Når gruppespillet er ferdig → fyll ut sluttspill manuelt", content_left + 10, y)
-        y -= 6
-
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "⏳ Viktig å huske")
-        y -= 18
-        y = draw_wrapped("- Tippingen stenger 24 timer før kampstart", content_left + 10, y)
-        y = draw_wrapped("- Også etter at resultatene er klare", content_left + 10, y)
-        y -= 4
-        y = draw_wrapped("👉 Sørg for å ha alt inne i tide!", content_left + 10, y)
-        y -= 8
-
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(content_left, y, "🚀 Klar?")
-        y -= 18
-        y = draw_wrapped("Skann QR-koden og bli med!", content_left + 10, y)
-
-        qr_size = 240
+        qr_size = 250
         qr_x = (page_w - qr_size) / 2
-        qr_y = 50
+        qr_y = 60
         pdf.setFillColor(colors.white)
-        pdf.roundRect(qr_x - 10, qr_y - 10, qr_size + 20, qr_size + 20, 8, stroke=1, fill=1)
+        pdf.roundRect(qr_x - 12, qr_y - 12, qr_size + 24, qr_size + 24, 10, stroke=1, fill=1)
         pdf.drawImage(qr_reader, qr_x, qr_y, width=qr_size, height=qr_size)
 
         pdf.setFillColor(text_dark)
         pdf.setFont("Helvetica-Bold", 11)
-        pdf.drawCentredString(page_w / 2, qr_y - 18, "Skann QR-koden for å delta")
-        pdf.setFont("Helvetica", 8)
-        pdf.drawCentredString(page_w / 2, qr_y - 32, join_url)
+        pdf.drawCentredString(page_w / 2, qr_y - 30, "Skann QR-koden for å delta")
+        pdf.setFont("Helvetica", 7)
+        pdf.drawCentredString(page_w / 2, qr_y - 44, join_url)
 
         pdf.showPage()
 
@@ -970,6 +1010,17 @@ def deactivate_invite(invite_id):
     invite.is_active = False
     db.session.commit()
     flash("Token deaktivert.", "success")
+    return redirect(url_for("admin.tab", tab="qr"))
+
+
+@admin_bp.route("/invite/<int:invite_id>/delete", methods=["POST"])
+def delete_invite(invite_id):
+    if not admin_required():
+        abort(403)
+    invite = InviteToken.query.get_or_404(invite_id)
+    db.session.delete(invite)
+    db.session.commit()
+    flash("Invitasjon slettet.", "success")
     return redirect(url_for("admin.tab", tab="qr"))
 
 

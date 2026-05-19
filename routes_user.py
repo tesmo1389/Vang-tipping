@@ -16,7 +16,7 @@ from models import (
 from scoring import (
     get_user_total_points, get_scoreboard, get_user_score_breakdown,
     recalculate_all_scores, recalculate_user_scores, get_per_match_points,
-    get_prize_pool_summary, SCORE_KEYS, calc_hub
+    get_prize_pool_summary, get_score_settings, SCORE_KEYS, calc_hub
 )
 from statistics import get_user_statistics, get_competition_statistics
 import pytz
@@ -208,7 +208,7 @@ def predict_match(match_id):
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         from flask import jsonify
         return jsonify({"ok": True, "hub": hub, "score": f"{home_score_int}–{away_score_int}"})
-    flash("Tips lagret!", "success")
+    flash("Tipping lagret!", "success")
     return redirect(url_for("user.index"))
 
 
@@ -225,8 +225,8 @@ def predict_group(group_id):
     if group_locked:
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             from flask import jsonify
-            return jsonify({"ok": False, "error": "Gruppetips er låst for denne gruppen."})
-        flash("Gruppetips er låst for denne gruppen.", "error")
+            return jsonify({"ok": False, "error": "Gruppetipping er låst for denne gruppen."})
+        flash("Gruppetipping er låst for denne gruppen.", "error")
         return redirect(url_for("user.index"))
 
     winner_id = request.form.get("winner_team_id")
@@ -250,7 +250,7 @@ def predict_group(group_id):
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         from flask import jsonify
         return jsonify({"ok": True})
-    flash(f"Gruppetips for {group.name} lagret!", "success")
+    flash(f"Gruppetipping for {group.name} lagret!", "success")
     return redirect(url_for("user.index"))
 
 
@@ -328,7 +328,7 @@ def predict_knockout(match_id):
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         from flask import jsonify
         return jsonify({"ok": True})
-    flash("Sluttspilltips lagret!", "success")
+    flash("Sluttspilltipping lagret!", "success")
     return redirect(url_for("user.knockout"))
 
 
@@ -367,6 +367,21 @@ def stats():
     )
 
 
+@user_bp.route("/info")
+def info():
+    user = get_current_user()
+    if not user:
+        return render_template("no_access.html")
+
+    score_settings = get_score_settings()
+    return render_template("user.html",
+        user=user,
+        total_points=get_user_total_points(user.id),
+        score_settings=score_settings,
+        active_tab="info",
+    )
+
+
 @user_bp.route("/export/pdf")
 def export_user_pdf():
     user = get_current_user()
@@ -394,11 +409,11 @@ def export_user_pdf():
     story = []
 
     story.append(Paragraph(f"Min tipping - {user.name}", styles["Title"]))
-    story.append(Paragraph(f"Eksportert: {now_utc().strftime('%d.%m.%Y %H:%M')}", styles["Normal"]))
+    story.append(Paragraph(f"Eksportert: {datetime.now(OSLO_TZ).strftime('%d.%m.%Y')}", styles["Normal"]))
     story.append(Spacer(1, 12))
 
     if group_preds:
-        story.append(Paragraph("Gruppetips", styles["Heading2"]))
+        story.append(Paragraph("Gruppetipping", styles["Heading2"]))
         data = [["Gruppe", "Vinner", "Andreplass"]]
         for gp, group in group_preds:
             data.append([
@@ -415,8 +430,8 @@ def export_user_pdf():
         story.append(Spacer(1, 12))
 
     if match_preds:
-        story.append(Paragraph("Kamper (tips og resultat)", styles["Heading2"]))
-        data = [["#", "Fase", "Kamp", "Resultat", "Tips", "HUB"]]
+        story.append(Paragraph("Kamper (tipping og resultat)", styles["Heading2"]))
+        data = [["#", "Fase", "Kamp", "Resultat", "Tipping", "HUB"]]
         for pred, match in match_preds:
             pred_hub = pred.predicted_hub
             if pred_hub is None and pred.predicted_home_score is not None and pred.predicted_away_score is not None:

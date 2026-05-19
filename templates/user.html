@@ -18,6 +18,8 @@
        class="tab-link {% if active_tab == 'knockout' %}active{% endif %}">🏆 Sluttspill</a>
     <a href="{{ url_for('user.stats') }}"
        class="tab-link {% if active_tab == 'stats' %}active{% endif %}">📊 Resultater</a>
+     <a href="{{ url_for('user.info') }}"
+       class="tab-link {% if active_tab == 'info' %}active{% endif %}">ℹ️ Info</a>
   </div>
 
   <!-- TAB: GROUP STAGE -->
@@ -137,7 +139,7 @@
           <div class="match-card {{ status_class }}">
             <div class="match-meta">
               <span class="match-number">#{{ match.match_number }}</span>
-              {% if match.kickoff_at_oslo %}
+              {% if match.kickoff_at_utc %}
               <span class="match-time">{{ match.kickoff_at_utc | oslo_time }}</span>
               {% endif %}
               {% if match.venue %}<span class="match-venue">{{ match.venue }}</span>{% endif %}
@@ -161,7 +163,7 @@
 
             {% if pred and pred.predicted_home_score is not none %}
             <div class="user-prediction">
-              <span class="pred-label">Ditt tips:</span>
+              <span class="pred-label">Din tipping:</span>
               <span class="pred-score">{{ pred.predicted_home_score }}–{{ pred.predicted_away_score }}</span>
               <span class="pred-hub hub-{{ pred.predicted_hub }}">{{ pred.predicted_hub }}</span>
             </div>
@@ -276,7 +278,7 @@
 
               {% if pred and pred.predicted_home_score is not none %}
               <div class="user-prediction">
-                <span class="pred-label">Ditt tips:</span>
+                <span class="pred-label">Din tipping:</span>
                 <span class="pred-score">{{ pred.predicted_home_score }}–{{ pred.predicted_away_score }}</span>
                 {% if pred.predicted_advanced_team %}
                 <span class="pred-adv">Videre: {{ pred.predicted_advanced_team.name }}</span>
@@ -409,7 +411,7 @@
         <tr><td>Eksakte resultater (sluttspill)</td><td>{{ user_stats.correct_exact_knockout }}</td></tr>
         <tr><td>Riktige gruppevinnere</td><td>{{ user_stats.correct_group_winners }}</td></tr>
         <tr><td>Riktige lag videre (sluttspill)</td><td>{{ user_stats.correct_advance }}</td></tr>
-        <tr><td>Perfekte tips totalt</td><td>{{ user_stats.perfect_total }}</td></tr>
+        <tr><td>Perfekte tipping totalt</td><td>{{ user_stats.perfect_total }}</td></tr>
         <tr><td>Treffprosent</td><td>{{ user_stats.hit_rate }}%</td></tr>
         <tr><td>Gjensnittlig poeng per kamp</td><td>{{ user_stats.avg_points_per_match }}</td></tr>
       </table>
@@ -427,8 +429,8 @@
         <tr><td>Medianpoeng</td><td>{{ comp_stats.median_points }}</td></tr>
         <tr><td>Ferdigspilte kamper</td><td>{{ comp_stats.total_finished }}</td></tr>
         <tr><td>Kamper som mangler resultat</td><td>{{ comp_stats.total_unfinished }}</td></tr>
-        <tr><td>Brukere med gruppetips</td><td>{{ comp_stats.users_with_group_preds }}</td></tr>
-        <tr><td>Brukere med sluttspilltips</td><td>{{ comp_stats.users_with_ko_preds }}</td></tr>
+        <tr><td>Brukere med gruppetipping</td><td>{{ comp_stats.users_with_group_preds }}</td></tr>
+        <tr><td>Brukere med sluttspilltipping</td><td>{{ comp_stats.users_with_ko_preds }}</td></tr>
       </table>
     </div>
     {% endif %}
@@ -463,6 +465,56 @@
       </table>
     </div>
     {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- TAB: INFO / RULES -->
+  {% if active_tab == 'info' %}
+  <div class="tab-content">
+    <div class="breakdown-card">
+      <h3>✅ Oppsummering av tipping</h3>
+      <p>Her tipper du på kampresultater og gruppeslutt i VM 2026.</p>
+      <ul>
+        <li>Gruppespill: velg gruppevinner og andreplass, og tipp resultat + HUB.</li>
+        <li>Sluttspill: tipp resultat og lag videre.</li>
+        <li>Poeng beregnes automatisk etter reglene under.</li>
+      </ul>
+    </div>
+
+    <div class="breakdown-card">
+      <h3>🧭 Slik bruker du siden</h3>
+      <ul>
+        <li>1. Velg fane: Gruppespill eller Sluttspill.</li>
+        <li>2. Legg inn tipping: skriv resultat og velg HUB/lag videre.</li>
+        <li>3. Lagre: trykk Lagre på hver kamp.</li>
+        <li>4. Se status: poeng og plassering vises i Resultater.</li>
+      </ul>
+    </div>
+
+    <div class="breakdown-card">
+      <h3>📌 Regler</h3>
+      <ul>
+        <li>Frist før kamp: All tipping stenger 1 time før avspark.</li>
+        <li>Gruppetipping: Tipp på vinner og andreplass i hver gruppe låses 1 time før første kamp i gruppen.</li>
+        <li>Endringer: Du kan gjøre endringer frem til tippingen låses.</li>
+        <li>Poeng: Poeng beregnes når kampen er ferdigspilt.</li>
+      </ul>
+    </div>
+
+    <div class="breakdown-card">
+      <h3>🏅 Hva gir poeng?</h3>
+      <ul>
+        <li>Riktig HUB (gruppespill): {{ score_settings.get('group_hub', 0) }} p</li>
+        <li>Eksakt resultat (gruppespill): {{ score_settings.get('group_exact', 0) }} p</li>
+        <li>Riktig gruppevinner: {{ score_settings.get('group_winner', 0) }} p</li>
+        <li>Riktig andreplass: {{ score_settings.get('group_second', 0) }} p</li>
+        <li>Riktig lag videre fra gruppe: {{ score_settings.get('group_advance', 0) }} p</li>
+        <li>Eksakt resultat (sluttspill): {{ score_settings.get('knockout_exact', 0) }} p</li>
+        <li>Riktig lag videre (sluttspill): {{ score_settings.get('knockout_advance', 0) }} p</li>
+        <li>Riktig finalist: {{ score_settings.get('knockout_finalist', 0) }} p</li>
+        <li>Riktig verdensmester: {{ score_settings.get('knockout_champion', 0) }} p</li>
+      </ul>
+    </div>
   </div>
   {% endif %}
 </div>
@@ -536,7 +588,7 @@ document.addEventListener('submit', function(e) {
   });
 });
 
-// ── Group lock countdown (24h before kickoff) ───────────────
+// ── Group lock countdown (1h before kickoff) ───────────────
 function formatCountdown(ms) {
   if (ms <= 0) return 'Låst';
   var totalSec = Math.floor(ms / 1000);

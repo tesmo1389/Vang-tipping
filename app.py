@@ -7,6 +7,7 @@ from datetime import datetime
 import pytz
 from flask import Flask, redirect, url_for
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 load_dotenv()
 
@@ -22,6 +23,8 @@ def create_app():
 
     # Config
     app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-this")
+    if app.secret_key == "dev-secret-key-change-this":
+        print("WARNING: SECRET_KEY is using the default value. Set SECRET_KEY in the environment for production.")
     db_path = os.path.join(os.path.dirname(__file__), "instance", "app.db")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
@@ -40,7 +43,7 @@ def create_app():
             return ""
         if not hasattr(dt, "tzinfo") or dt.tzinfo is None:
             dt = pytz.utc.localize(dt)
-        return dt.astimezone(OSLO_TZ).strftime("%d.%m.%Y %H:%M")
+        return dt.astimezone(OSLO_TZ).strftime("%d.%m.%Y")
 
     @app.template_filter("round_label")
     def round_label_filter(round_name):
@@ -57,10 +60,11 @@ def create_app():
 
     @app.template_global()
     def now_oslo():
-        return datetime.now(OSLO_TZ).strftime("%d.%m.%Y %H:%M")
+        return datetime.now(OSLO_TZ).strftime("%d.%m.%Y")
 
     with app.app_context():
         db.create_all()
+        _ensure_users_has_paid()
         _seed_defaults()
 
     return app
@@ -89,12 +93,12 @@ def _seed_defaults():
     # Bracket edges
     _seed_bracket_edges()
 
-    # Normalize match lock times to be per-match (24h before kickoff)
+    # Normalize match lock times to be per-match (1h before kickoff)
     from datetime import timedelta
     changed = False
     for m in Match.query.filter(Match.phase.in_(["group", "knockout"])).all():
         if m.kickoff_at_utc:
-            expected_lock = m.kickoff_at_utc - timedelta(hours=24)
+            expected_lock = m.kickoff_at_utc - timedelta(hours=1)
             if m.lock_at_utc != expected_lock:
                 m.lock_at_utc = expected_lock
                 changed = True
@@ -104,7 +108,7 @@ def _seed_defaults():
         if first_group and first_group.kickoff_at_utc:
             CompetitionSetting.set(
                 "group_stage_lock_at",
-                (first_group.kickoff_at_utc - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+                (first_group.kickoff_at_utc - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
             )
 
     db.session.commit()
@@ -161,6 +165,15 @@ def _seed_bracket_edges():
                 target_match_number=tgt,
                 target_slot=slot,
             ))
+
+
+def _ensure_users_has_paid():
+    if db.engine.url.get_backend_name() != "sqlite":
+        return
+    cols = [row[1] for row in db.session.execute(text("PRAGMA table_info(users)"))]
+    if "has_paid" not in cols:
+        db.session.execute(text("ALTER TABLE users ADD COLUMN has_paid BOOLEAN DEFAULT 0"))
+        db.session.commit()
 
 
 app = create_app()

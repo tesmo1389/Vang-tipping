@@ -11,7 +11,7 @@
       <img src="data:image/png;base64,{{ qr_b64 }}" alt="QR-kode" style="max-width: 300px; width: 100%; border: 1px solid #eee; border-radius: 8px;">
     </div>
     <div style="text-align:center;">
-      <p>Opprettet: {{ invite.created_at.strftime('%d.%m.%Y %H:%M') if invite.created_at else '-' }}</p>
+      <p>Opprettet: {{ invite.created_at.strftime('%d.%m.%Y') if invite.created_at else '-' }}</p>
       {% if invite.used_by_user %}
       <p>Brukt av: {{ invite.used_by_user.name }}</p>
       {% else %}
