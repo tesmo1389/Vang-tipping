@@ -1,0 +1,6 @@
+# Local database
+instance/app.db
+
+# Python cache
+__pycache__/
+*.pyc
