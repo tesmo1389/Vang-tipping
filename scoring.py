@@ -15,7 +15,6 @@ SCORE_KEYS = [
     "group_exact",
     "group_winner",
     "group_second",
-    "group_advance",
     "knockout_exact",
     "knockout_advance",
     "knockout_finalist",
@@ -27,7 +26,6 @@ DEFAULT_SCORES = {
     "group_exact": 3,
     "group_winner": 5,
     "group_second": 3,
-    "group_advance": 2,
     "knockout_exact": 3,
     "knockout_advance": 2,
     "knockout_finalist": 5,
@@ -91,6 +89,13 @@ def calculate_user_scores(user_id):
     settings = get_score_settings()
     scores = {k: 0 for k in SCORE_KEYS}
 
+    group_matches_all = Match.query.filter_by(phase="group").all()
+    group_complete = {}
+    for gm in group_matches_all:
+        if gm.group_id is None:
+            continue
+        group_complete[gm.group_id] = group_complete.get(gm.group_id, True) and bool(gm.is_finished)
+
     # Group stage match predictions
     group_matches = Match.query.filter_by(phase="group", is_finished=True).all()
     for match in group_matches:
@@ -99,21 +104,30 @@ def calculate_user_scores(user_id):
         pred = UserPrediction.query.filter_by(user_id=user_id, match_id=match.id).first()
         if not pred:
             continue
-        if pred.predicted_home_score is None or pred.predicted_away_score is None:
-            continue
 
         actual_hub = calc_hub(match.home_score, match.away_score)
-        pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        pred_hub = pred.predicted_hub
+        if pred_hub not in ("H", "U", "B") and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+            pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
 
         if pred_hub == actual_hub:
             scores["group_hub"] += settings["group_hub"]
-            if (pred.predicted_home_score == match.home_score and
+            if (pred.predicted_home_score is not None and pred.predicted_away_score is not None and
+                    pred.predicted_home_score == match.home_score and
                     pred.predicted_away_score == match.away_score):
-                scores["group_exact"] += settings["group_exact"] - settings["group_hub"]
+                scores["group_exact"] += settings["group_exact"]
 
     # Group position predictions
     groups_with_standings = db.session.query(GroupStanding.group_id).distinct().all()
     for (group_id,) in groups_with_standings:
+        # Check if ALL matches in this specific group are finished
+        group_matches_count = Match.query.filter_by(group_id=group_id, phase="group").count()
+        group_finished_count = Match.query.filter_by(group_id=group_id, phase="group", is_finished=True).count()
+        
+        # Only award points if all matches in this group are complete
+        if group_matches_count == 0 or group_finished_count != group_matches_count:
+            continue
+
         gp = GroupPrediction.query.filter_by(user_id=user_id, group_id=group_id).first()
         if not gp:
             continue
@@ -129,16 +143,6 @@ def calculate_user_scores(user_id):
             if gp.predicted_second_team_id == actual_ids[1]:
                 scores["group_second"] += settings["group_second"]
 
-        # Correct team advancing (1st or 2nd)
-        advancing = set(actual_ids[:2])
-        predicted_advancing = set()
-        if gp.predicted_winner_team_id:
-            predicted_advancing.add(gp.predicted_winner_team_id)
-        if gp.predicted_second_team_id:
-            predicted_advancing.add(gp.predicted_second_team_id)
-        for team_id in predicted_advancing:
-            if team_id in advancing:
-                scores["group_advance"] += settings["group_advance"]
 
     # Knockout predictions
     knockout_matches = Match.query.filter_by(phase="knockout", is_finished=True).all()
@@ -214,17 +218,78 @@ def get_user_total_points(user_id):
     return result or 0
 
 
+def _get_user_tiebreak_counts(user_id):
+    """Return tie-break counts: exact score hits and correct HUB hits."""
+    exact_hits = 0
+    hub_hits = 0
+
+    group_matches = Match.query.filter_by(phase="group", is_finished=True).all()
+    for match in group_matches:
+        if match.home_score is None or match.away_score is None:
+            continue
+
+        pred = UserPrediction.query.filter_by(user_id=user_id, match_id=match.id).first()
+        if not pred:
+            continue
+        if pred.predicted_home_score is None or pred.predicted_away_score is None:
+            continue
+
+        actual_hub = calc_hub(match.home_score, match.away_score)
+        predicted_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        if predicted_hub == actual_hub:
+            hub_hits += 1
+
+        if (pred.predicted_home_score == match.home_score and
+                pred.predicted_away_score == match.away_score):
+            exact_hits += 1
+
+    knockout_matches = Match.query.filter_by(phase="knockout", is_finished=True).all()
+    for match in knockout_matches:
+        if match.home_score is None or match.away_score is None:
+            continue
+
+        pred = UserPrediction.query.filter_by(user_id=user_id, match_id=match.id).first()
+        if not pred or not pred.is_valid:
+            continue
+        if pred.predicted_home_score is None or pred.predicted_away_score is None:
+            continue
+
+        actual_hub = calc_hub(match.home_score, match.away_score)
+        predicted_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        if predicted_hub == actual_hub:
+            hub_hits += 1
+
+        if (pred.predicted_home_score == match.home_score and
+                pred.predicted_away_score == match.away_score):
+            exact_hits += 1
+
+    return exact_hits, hub_hits
+
+
 def get_scoreboard():
     """Return sorted list of (user, total_points, rank)."""
     users = User.query.filter_by(is_active=True).all()
     board = []
     for user in users:
         pts = get_user_total_points(user.id)
-        board.append((user, pts))
-    board.sort(key=lambda x: -x[1])
+        exact_hits, hub_hits = _get_user_tiebreak_counts(user.id)
+        breakdown = get_user_score_breakdown(user.id)
+        board.append((user, pts, exact_hits, hub_hits, breakdown))
+    board.sort(key=lambda x: (-x[1], -x[2], -x[3], x[0].id))
     result = []
-    for i, (user, pts) in enumerate(board):
-        result.append({"user": user, "points": pts, "rank": i + 1})
+    for i, (user, pts, exact_hits, hub_hits, breakdown) in enumerate(board):
+        exact_points = breakdown.get("group_exact", 0) + breakdown.get("knockout_exact", 0)
+        hub_points = breakdown.get("group_hub", 0)
+        result.append({
+            "user": user,
+            "points": pts,
+            "exact_hits": exact_hits,
+            "hub_hits": hub_hits,
+            "exact_points": exact_points,
+            "hub_points": hub_points,
+            "rank": i + 1,
+            "breakdown": breakdown,
+        })
     return result
 
 
@@ -264,15 +329,18 @@ def get_per_match_points(user_id):
             result[match.id] = None
             continue
         pred = UserPrediction.query.filter_by(user_id=user_id, match_id=match.id).first()
-        if not pred or pred.predicted_home_score is None:
+        if not pred:
             result[match.id] = None
             continue
         actual_hub = calc_hub(match.home_score, match.away_score)
-        pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        pred_hub = pred.predicted_hub
+        if pred_hub not in ("H", "U", "B") and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+            pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
         if pred_hub == actual_hub:
-            if (pred.predicted_home_score == match.home_score and
+            if (pred.predicted_home_score is not None and pred.predicted_away_score is not None and
+                    pred.predicted_home_score == match.home_score and
                     pred.predicted_away_score == match.away_score):
-                result[match.id] = settings["group_exact"]
+                result[match.id] = settings["group_exact"] + settings["group_hub"]
             else:
                 result[match.id] = settings["group_hub"]
         else:
@@ -302,3 +370,113 @@ def get_per_match_points(user_id):
         result[match.id] = pts
 
     return result
+
+
+def get_statistics():
+    """Samle statistikk for admin statistikk-side."""
+    scoreboard = get_scoreboard()
+    settings = get_score_settings()
+    
+    # Grunnleggende statistikk
+    num_users = User.query.count()
+    total_points = sum(entry['points'] for entry in scoreboard)
+    avg_points = total_points / num_users if num_users > 0 else 0
+    avg_exact_hits = sum(entry['exact_hits'] for entry in scoreboard) / num_users if num_users > 0 else 0
+    avg_hub_hits = sum(entry['hub_hits'] for entry in scoreboard) / num_users if num_users > 0 else 0
+    
+    # Poengfordeling per kategori
+    score_distribution = {key: 0 for key in SCORE_KEYS}
+    score_counts = {key: 0 for key in SCORE_KEYS}  # Antall ganger poeng ble gitt
+    
+    for user in User.query.all():
+        breakdown = get_user_score_breakdown(user.id)
+        for key in SCORE_KEYS:
+            if key in breakdown:
+                points = breakdown[key]
+                score_distribution[key] += points
+                if points > 0:
+                    score_counts[key] += 1
+    
+    # Top 10 brukere
+    top_users = scoreboard[:10] if len(scoreboard) > 0 else []
+    
+    # Bottom 10 brukere
+    bottom_users = scoreboard[-10:] if len(scoreboard) > 0 else []
+    bottom_users.reverse()  # Omvendt rekkefølge
+    
+    # Poengfordeling histogram
+    point_ranges = {
+        "0-20": 0,
+        "20-50": 0,
+        "50-100": 0,
+        "100-150": 0,
+        "150+": 0,
+    }
+    for entry in scoreboard:
+        pts = entry['points']
+        if pts < 20:
+            point_ranges["0-20"] += 1
+        elif pts < 50:
+            point_ranges["20-50"] += 1
+        elif pts < 100:
+            point_ranges["50-100"] += 1
+        elif pts < 150:
+            point_ranges["100-150"] += 1
+        else:
+            point_ranges["150+"] += 1
+    
+    # Gruppe vs Knockout statistikk
+    group_preds_exact = UserPrediction.query.join(Match).filter(
+        Match.phase == "group",
+        UserPrediction.predicted_home_score == Match.home_score,
+        UserPrediction.predicted_away_score == Match.away_score
+    ).count()
+    group_preds_total = UserPrediction.query.join(Match).filter(
+        Match.phase == "group",
+        Match.is_finished == True
+    ).count()
+    group_accuracy = round((group_preds_exact / group_preds_total * 100) if group_preds_total > 0 else 0, 1)
+    
+    ko_preds_exact = UserPrediction.query.join(Match).filter(
+        Match.phase == "knockout",
+        UserPrediction.predicted_home_score == Match.home_score,
+        UserPrediction.predicted_away_score == Match.away_score
+    ).count()
+    ko_preds_total = UserPrediction.query.join(Match).filter(
+        Match.phase == "knockout",
+        Match.is_finished == True
+    ).count()
+    ko_accuracy = round((ko_preds_exact / ko_preds_total * 100) if ko_preds_total > 0 else 0, 1)
+    
+    # Gjennomsnittlig poeng per kategori
+    avg_score_per_category = {}
+    for key in SCORE_KEYS:
+        if score_counts[key] > 0:
+            avg_score_per_category[key] = round(score_distribution[key] / score_counts[key], 2)
+        else:
+            avg_score_per_category[key] = 0
+    
+    # Statistikk om prediksjonsfordeling (eksakt, HUB, ingenting)
+    exact_count = sum(entry['exact_hits'] for entry in scoreboard)
+    hub_only_count = sum(entry['hub_hits'] - entry['exact_hits'] for entry in scoreboard)
+    no_match_count = group_preds_total - exact_count - hub_only_count if group_preds_total > 0 else 0
+    
+    return {
+        "num_users": num_users,
+        "total_points": total_points,
+        "avg_points": round(avg_points, 2),
+        "avg_exact_hits": round(avg_exact_hits, 2),
+        "avg_hub_hits": round(avg_hub_hits, 2),
+        "score_distribution": score_distribution,
+        "score_counts": score_counts,
+        "avg_score_per_category": avg_score_per_category,
+        "top_users": top_users,
+        "bottom_users": bottom_users,
+        "point_ranges": point_ranges,
+        "group_accuracy": group_accuracy,
+        "ko_accuracy": ko_accuracy,
+        "exact_count": exact_count,
+        "hub_only_count": max(0, hub_only_count),
+        "no_match_count": max(0, no_match_count),
+        "score_settings": settings,
+    }

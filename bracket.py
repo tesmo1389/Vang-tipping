@@ -40,6 +40,92 @@ def advance_team_in_bracket(match_number, advanced_team_id, loser_team_id=None):
     db.session.commit()
 
 
+def fill_bracket_from_completed_groups():
+    """
+    For each fully finished group, fill in winner and runner-up into the
+    Round of 32 slots. Also recalculates third-place rankings and fills
+    those slots when 8+ groups are done.
+    Safe to call after every group match result – only fills where teams
+    are known and won't overwrite manual overrides already in knockout.
+    """
+    group_map = {g.name.split()[-1]: g for g in Group.query.all()}
+
+    def group_complete(letter):
+        grp = group_map.get(letter)
+        if not grp:
+            return False
+        total = Match.query.filter_by(group_id=grp.id, phase="group").count()
+        done = Match.query.filter_by(group_id=grp.id, phase="group", is_finished=True).count()
+        return total > 0 and total == done
+
+    def get_team_by_rank(group_letter, rank):
+        grp = group_map.get(group_letter)
+        if not grp:
+            return None
+        standings = GroupStanding.query.filter_by(group_id=grp.id).all()
+        ranked = sorted(standings, key=lambda s: s.rank or 99)
+        if len(ranked) >= rank:
+            return ranked[rank - 1].team_id
+        return None
+
+    # Direct slots (winner and runner-up) for Round of 32
+    direct_slots = {
+        73: [("home", 2, "A"), ("away", 2, "B")],
+        75: [("home", 1, "F"), ("away", 2, "C")],
+        76: [("home", 1, "C"), ("away", 2, "F")],
+        78: [("home", 2, "E"), ("away", 2, "I")],
+        83: [("home", 2, "K"), ("away", 2, "L")],
+        84: [("home", 1, "H"), ("away", 2, "J")],
+        86: [("home", 1, "J"), ("away", 2, "H")],
+        88: [("home", 2, "D"), ("away", 2, "G")],
+    }
+    home_slots = {
+        74: (1, "E"), 77: (1, "I"), 79: (1, "A"), 80: (1, "L"),
+        81: (1, "D"), 82: (1, "G"), 85: (1, "B"), 87: (1, "K"),
+    }
+
+    changed = False
+    for match_num, slots in direct_slots.items():
+        match = Match.query.filter_by(match_number=match_num).first()
+        if not match:
+            continue
+        for slot, rank, letter in slots:
+            if not group_complete(letter):
+                continue
+            team_id = get_team_by_rank(letter, rank)
+            if team_id:
+                if slot == "home" and match.home_team_id != team_id:
+                    match.home_team_id = team_id
+                    changed = True
+                elif slot == "away" and match.away_team_id != team_id:
+                    match.away_team_id = team_id
+                    changed = True
+
+    for match_num, (rank, letter) in home_slots.items():
+        match = Match.query.filter_by(match_number=match_num).first()
+        if not match or not group_complete(letter):
+            continue
+        team_id = get_team_by_rank(letter, rank)
+        if team_id and match.home_team_id != team_id:
+            match.home_team_id = team_id
+            changed = True
+
+    # Third-place slots – only attempt when ≥8 groups are fully done
+    completed_letters = [l for l in group_map if group_complete(l)]
+    if len(completed_letters) >= 8:
+        calculate_third_place_rankings()
+        _fill_third_place_slots(group_map)
+        changed = True
+
+    if changed:
+        db.session.commit()
+        db.session.add(AdminAuditLog(
+            action="auto_fill_bracket",
+            details=f"Bracket oppdatert fra ferdige grupper: {sorted(completed_letters)}"
+        ))
+        db.session.commit()
+
+
 def fill_round_of_32():
     """
     Fill Round of 32 matches with group winners, runners-up, and best third-placed teams.

@@ -1,10 +1,14 @@
 """
 routes_admin.py - Adminrouter for VM 2026 tipping.
 """
+import os
 import io
+import csv
+import shutil
 import secrets
 import qrcode
 import base64
+import json
 from datetime import datetime
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
@@ -18,16 +22,17 @@ from models import (
     db, User, InviteToken, Match, Group, Team, GroupStanding,
     ThirdPlaceRanking, CompetitionSetting, ScoreSetting,
     AdminAuditLog, ScoreCache, ScoreboardSnapshot,
-    UserPrediction, GroupPrediction, now_utc
+    UserPrediction, GroupPrediction, now_utc, cleanup_expired_invites
 )
 from scoring import (
     recalculate_all_scores, get_scoreboard, get_prize_pool_summary, DEFAULT_SCORES,
     get_user_total_points, get_user_score_breakdown, get_per_match_points,
-    get_score_settings, calc_hub
+    get_score_settings, calc_hub, get_statistics
 )
 from bracket import (
     advance_team_in_bracket, fill_round_of_32,
-    calculate_group_standings, calculate_third_place_rankings
+    calculate_group_standings, calculate_third_place_rankings,
+    fill_bracket_from_completed_groups
 )
 from import_export import (
     generate_excel_template, generate_csv_template,
@@ -123,6 +128,7 @@ def save_match_result(match_id):
 
     if is_finished and match.phase == "group":
         calculate_group_standings()
+        fill_bracket_from_completed_groups()
 
     if is_finished and match.phase == "knockout" and match.advanced_team_id:
         advance_team_in_bracket(match.match_number, match.advanced_team_id, match.loser_team_id)
@@ -142,6 +148,112 @@ def save_match_result(match_id):
     flash(msg, "success")
     next_tab = request.form.get("next_tab", "groups")
     return redirect(url_for("admin.tab", tab=next_tab))
+
+
+@admin_bp.route("/match/<int:match_id>/quick-update", methods=["POST"])
+def quick_update_match(match_id):
+    if not admin_required():
+        abort(403)
+
+    match = Match.query.get_or_404(match_id)
+
+    home_score_raw = request.form.get("home_score", "").strip()
+    away_score_raw = request.form.get("away_score", "").strip()
+    is_finished = request.form.get("is_finished") == "1"
+    result_note = request.form.get("result_note", "").strip()
+    kickoff_str = request.form.get("kickoff_at_oslo", "").strip()
+
+    def parse_score(value):
+        if value == "":
+            return None
+        return int(value)
+
+    try:
+        match.home_score = parse_score(home_score_raw)
+        match.away_score = parse_score(away_score_raw)
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "flash": "Ugyldig poengsum."}), 400
+
+    if not kickoff_str:
+        return jsonify({"ok": False, "flash": "Kampstart må ha både dato og tid."}), 400
+
+    try:
+        local_dt = datetime.strptime(kickoff_str, "%Y-%m-%dT%H:%M")
+        oslo_dt = OSLO_TZ.localize(local_dt)
+        kickoff_utc = oslo_dt.astimezone(pytz.utc).replace(tzinfo=None)
+        match.kickoff_at_utc = kickoff_utc
+        match.kickoff_at_oslo_cache = kickoff_str.replace("T", " ")
+        from datetime import timedelta
+        match.lock_at_utc = kickoff_utc - timedelta(hours=1)
+    except Exception:
+        return jsonify({"ok": False, "flash": "Ugyldig kampstart."}), 400
+
+    match.is_finished = is_finished
+    match.result_note = result_note
+
+    if match.phase == "knockout":
+        advanced_team_id = None
+        if match.home_score is not None and match.away_score is not None:
+            if match.home_score > match.away_score:
+                advanced_team_id = match.home_team_id
+            elif match.away_score > match.home_score:
+                advanced_team_id = match.away_team_id
+
+        match.advanced_team_id = advanced_team_id
+        if advanced_team_id and match.home_team_id and match.away_team_id:
+            match.loser_team_id = match.away_team_id if advanced_team_id == match.home_team_id else match.home_team_id
+        else:
+            match.loser_team_id = None
+
+    db.session.commit()
+
+    if match.phase == "group":
+        calculate_group_standings()
+        fill_bracket_from_completed_groups()
+
+    if match.phase == "knockout" and match.is_finished and match.advanced_team_id:
+        advance_team_in_bracket(match.match_number, match.advanced_team_id, match.loser_team_id)
+
+    recalculate_all_scores()
+
+    db.session.add(AdminAuditLog(action="quick_update_match", details=f"Kamp {match.match_number} oppdatert fra kampliste"))
+    db.session.commit()
+
+    if match.kickoff_at_utc:
+        kickoff_local = pytz.utc.localize(match.kickoff_at_utc).astimezone(OSLO_TZ)
+        kickoff_display = kickoff_local.strftime("%d.%m.%Y")
+    else:
+        kickoff_display = "-"
+
+    if match.home_score is not None and match.away_score is not None:
+        result_display = f"{match.home_score} – {match.away_score}"
+    else:
+        result_display = "–"
+
+    if match.is_finished:
+        status_label = "Ferdig"
+        status_class = "badge-finished"
+        row_style = "background:#f0fdf4"
+    elif match.effective_locked:
+        status_label = "Låst"
+        status_class = "badge-locked"
+        row_style = "background:#fffbeb"
+    else:
+        status_label = "Åpen"
+        status_class = "badge-open"
+        row_style = ""
+
+    return jsonify({
+        "ok": True,
+        "flash": f"Kamp {match.match_number} lagret.",
+        "kickoff_display": kickoff_display,
+        "kickoff_value": match.kickoff_at_oslo_cache.replace(" ", "T") if match.kickoff_at_oslo_cache else "",
+        "result_display": result_display,
+        "status_label": status_label,
+        "status_class": status_class,
+        "row_style": row_style,
+        "is_finished": bool(match.is_finished),
+    })
 
 
 @admin_bp.route("/tab/<tab>")
@@ -189,6 +301,8 @@ def tab(tab):
     prize_summary = get_prize_pool_summary()
 
     scoreboard = get_scoreboard()
+    statistics = get_statistics()
+    audit_logs = AdminAuditLog.query.order_by(AdminAuditLog.id.desc()).limit(200).all()
 
     return render_template("admin.html",
         active_tab=tab,
@@ -205,7 +319,62 @@ def tab(tab):
         score_settings=score_settings,
         default_scores=DEFAULT_SCORES,
         scoreboard=scoreboard,
+        statistics=statistics,
+        audit_logs=audit_logs,
     )
+
+
+@admin_bp.route("/log/feed")
+def log_feed():
+    if not admin_required():
+        abort(403)
+    since_id = request.args.get("since", 0, type=int)
+    entries = (
+        AdminAuditLog.query
+        .filter(AdminAuditLog.id > since_id)
+        .order_by(AdminAuditLog.id.desc())
+        .limit(100)
+        .all()
+    )
+    data = [
+        {
+            "id": e.id,
+            "action": e.action,
+            "details": e.details or "",
+            "created_at": e.created_at.strftime("%d.%m.%Y %H:%M:%S") if e.created_at else "",
+        }
+        for e in entries
+    ]
+    return jsonify(data)
+
+
+@admin_bp.route("/log/export.csv")
+def export_log_csv():
+    if not admin_required():
+        abort(403)
+
+    logs = AdminAuditLog.query.order_by(AdminAuditLog.id.desc()).all()
+
+    text_buf = io.StringIO()
+    writer = csv.writer(text_buf, delimiter=';')
+    writer.writerow(["id", "tidspunkt", "handling", "detaljer"])
+    for entry in logs:
+        writer.writerow([
+            entry.id,
+            entry.created_at.strftime("%d.%m.%Y %H:%M:%S") if entry.created_at else "",
+            entry.action or "",
+            entry.details or "",
+        ])
+
+    db.session.add(AdminAuditLog(action="export_log_csv", details=f"Rows: {len(logs)}"))
+    db.session.commit()
+
+    data = text_buf.getvalue().encode("utf-8-sig")
+    out = io.BytesIO(data)
+    out.seek(0)
+
+    filename = f"admin_logg_{datetime.now(OSLO_TZ).strftime('%Y%m%d_%H%M%S')}.csv"
+    return send_file(out, as_attachment=True, download_name=filename, mimetype="text/csv")
 
 
 @admin_bp.route("/user/<int:user_id>")
@@ -284,16 +453,6 @@ def user_detail(user_id):
         winner_pts = settings["group_winner"] if gp.predicted_winner_team_id and actual_ids and gp.predicted_winner_team_id == actual_ids[0] else 0
         second_pts = settings["group_second"] if gp.predicted_second_team_id and len(actual_ids) >= 2 and gp.predicted_second_team_id == actual_ids[1] else 0
 
-        advance_pts = 0
-        predicted_advancing = set()
-        if gp.predicted_winner_team_id:
-            predicted_advancing.add(gp.predicted_winner_team_id)
-        if gp.predicted_second_team_id:
-            predicted_advancing.add(gp.predicted_second_team_id)
-        for team_id in predicted_advancing:
-            if team_id in actual_ids[:2]:
-                advance_pts += settings["group_advance"]
-
         group_rows.append({
             "group_name": group.name,
             "pred_winner": gp.predicted_winner.name if gp.predicted_winner else "-",
@@ -302,8 +461,8 @@ def user_detail(user_id):
             "actual_second": actual_second,
             "winner_pts": winner_pts,
             "second_pts": second_pts,
-            "advance_pts": advance_pts,
-            "total_pts": winner_pts + second_pts + advance_pts,
+            "advance_pts": 0,
+            "total_pts": winner_pts + second_pts,
         })
 
     return render_template("admin_user.html",
@@ -386,16 +545,6 @@ def user_predictions_pdf(user_id):
             winner_pts = settings["group_winner"] if gp.predicted_winner_team_id and actual_ids and gp.predicted_winner_team_id == actual_ids[0] else 0
             second_pts = settings["group_second"] if gp.predicted_second_team_id and len(actual_ids) >= 2 and gp.predicted_second_team_id == actual_ids[1] else 0
 
-            advance_pts = 0
-            predicted_advancing = set()
-            if gp.predicted_winner_team_id:
-                predicted_advancing.add(gp.predicted_winner_team_id)
-            if gp.predicted_second_team_id:
-                predicted_advancing.add(gp.predicted_second_team_id)
-            for team_id in predicted_advancing:
-                if team_id in actual_ids[:2]:
-                    advance_pts += settings["group_advance"]
-
             data.append([
                 group.name,
                 gp.predicted_winner.name if gp.predicted_winner else "-",
@@ -404,8 +553,7 @@ def user_predictions_pdf(user_id):
                 actual_second,
                 str(winner_pts),
                 str(second_pts),
-                str(advance_pts),
-                str(winner_pts + second_pts + advance_pts),
+                str(winner_pts + second_pts),
             ])
         table = Table(data, hAlign="LEFT")
         table.setStyle(TableStyle([
@@ -814,12 +962,204 @@ def export_users():
     )
 
 
+@admin_bp.route("/export/backup.json")
+def export_backup_json():
+    if not admin_required():
+        abort(403)
+
+    def dt(v):
+        return v.isoformat() if v else None
+
+    users = User.query.order_by(User.id).all()
+    invites = InviteToken.query.order_by(InviteToken.id).all()
+    matches = Match.query.order_by(Match.match_number).all()
+    user_predictions = UserPrediction.query.order_by(UserPrediction.id).all()
+    group_predictions = GroupPrediction.query.order_by(GroupPrediction.id).all()
+    score_cache_rows = ScoreCache.query.order_by(ScoreCache.user_id, ScoreCache.category).all()
+    snapshots = ScoreboardSnapshot.query.order_by(ScoreboardSnapshot.created_at, ScoreboardSnapshot.rank).all()
+
+    backup = {
+        "generated_at": datetime.now(OSLO_TZ).isoformat(),
+        "version": "1.2",
+        "users": [
+            {
+                "id": u.id,
+                "name": u.name,
+                "email": u.email,
+                "token": u.token,
+                "created_at": dt(u.created_at),
+                "last_seen_at": dt(u.last_seen_at),
+                "is_active": u.is_active,
+                "has_paid": bool(u.has_paid),
+                "anonymous_label": u.anonymous_label,
+            }
+            for u in users
+        ],
+        "invite_tokens": [
+            {
+                "id": i.id,
+                "token": i.token,
+                "created_at": dt(i.created_at),
+                "used_at": dt(i.used_at),
+                "used_by_user_id": i.used_by_user_id,
+                "is_active": i.is_active,
+            }
+            for i in invites
+        ],
+        "matches": [
+            {
+                "id": m.id,
+                "match_number": m.match_number,
+                "phase": m.phase,
+                "round_name": m.round_name,
+                "group_id": m.group_id,
+                "home_team_id": m.home_team_id,
+                "away_team_id": m.away_team_id,
+                "home_slot_source": m.home_slot_source,
+                "away_slot_source": m.away_slot_source,
+                "kickoff_at_utc": dt(m.kickoff_at_utc),
+                "kickoff_at_oslo_cache": m.kickoff_at_oslo_cache,
+                "venue": m.venue,
+                "city": m.city,
+                "country": m.country,
+                "home_score": m.home_score,
+                "away_score": m.away_score,
+                "advanced_team_id": m.advanced_team_id,
+                "loser_team_id": m.loser_team_id,
+                "result_note": m.result_note,
+                "is_finished": bool(m.is_finished),
+                "is_locked": bool(m.is_locked),
+                "manual_lock_override": m.manual_lock_override,
+            }
+            for m in matches
+        ],
+        "user_predictions": [
+            {
+                "id": p.id,
+                "user_id": p.user_id,
+                "match_id": p.match_id,
+                "predicted_home_score": p.predicted_home_score,
+                "predicted_away_score": p.predicted_away_score,
+                "predicted_hub": p.predicted_hub,
+                "predicted_winner_team_id": p.predicted_winner_team_id,
+                "predicted_advanced_team_id": p.predicted_advanced_team_id,
+                "updated_at": dt(p.updated_at),
+                "submitted_at": dt(p.submitted_at),
+                "is_valid": bool(p.is_valid),
+            }
+            for p in user_predictions
+        ],
+        "group_predictions": [
+            {
+                "id": p.id,
+                "user_id": p.user_id,
+                "group_id": p.group_id,
+                "predicted_winner_team_id": p.predicted_winner_team_id,
+                "predicted_second_team_id": p.predicted_second_team_id,
+                "predicted_third_team_id": p.predicted_third_team_id,
+                "updated_at": dt(p.updated_at),
+            }
+            for p in group_predictions
+        ],
+        "score_cache": [
+            {
+                "id": s.id,
+                "user_id": s.user_id,
+                "category": s.category,
+                "points": s.points,
+                "recalculated_at": dt(s.recalculated_at),
+            }
+            for s in score_cache_rows
+        ],
+        "scoreboard_snapshots": [
+            {
+                "id": s.id,
+                "user_id": s.user_id,
+                "rank": s.rank,
+                "points": s.points,
+                "created_at": dt(s.created_at),
+            }
+            for s in snapshots
+        ],
+        "scoreboard_now": [
+            {
+                "rank": entry["rank"],
+                "user_id": entry["user"].id,
+                "name": entry["user"].name,
+                "points": entry["points"],
+            }
+            for entry in get_scoreboard()
+        ],
+    }
+
+    data = json.dumps(backup, ensure_ascii=False, indent=2).encode("utf-8")
+    filename = f"backup_{datetime.now(OSLO_TZ).strftime('%Y%m%d_%H%M%S')}.json"
+
+    db.session.add(AdminAuditLog(action="export_backup_json", details=f"Rows: users={len(users)}, matches={len(matches)}"))
+    db.session.commit()
+
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
+@admin_bp.route("/export/database.db")
+def export_database():
+    if not admin_required():
+        abort(403)
+
+    db_path = os.path.join(os.path.dirname(__file__), "instance", "app.db")
+
+    if not os.path.exists(db_path):
+        abort(404)
+
+    filename = f"tipping_database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+    
+    # Create a temporary copy of the database to avoid lock issues
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+    temp_path = os.path.join(temp_dir, filename)
+    
+    try:
+        shutil.copy2(db_path, temp_path)
+    except Exception as e:
+        return jsonify({"ok": False, "flash": f"Kunne ikke kopiere database: {str(e)}"}), 500
+
+    db.session.add(AdminAuditLog(action="export_database", details="Database file downloaded"))
+    db.session.commit()
+
+    def cleanup_temp_file():
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+
+    return send_file(
+        temp_path,
+        mimetype="application/octet-stream",
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
 # ── QR / Invitations ──────────────────────────────────────────────────────────
 
 @admin_bp.route("/invite/generate", methods=["POST"])
 def generate_invite():
     if not admin_required():
         abort(403)
+    
+    deleted_count = cleanup_expired_invites()
+    if deleted_count > 0:
+        db.session.add(AdminAuditLog(
+            action="cleanup_expired_invites",
+            details=f"Deleted {deleted_count} expired unused invitation(s)"
+        ))
+        db.session.commit()
+    
     token = secrets.token_urlsafe(32)
     invite = InviteToken(token=token)
     db.session.add(invite)

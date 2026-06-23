@@ -29,6 +29,7 @@
   <!-- Admin Tab Bar -->
   <div class="admin-tab-bar">
     {% set tabs = [
+      ('statistics', '📊 Statistikk'),
       ('groups', '⚽ Grupper'),
       ('knockout', '🏆 Sluttspill'),
       ('matches', '📋 Kamper'),
@@ -36,6 +37,7 @@
       ('qr', '📱 QR/Invitasjoner'),
       ('settings', '⚙️ Innstillinger'),
       ('schedule', '📅 Kampplan-import'),
+      ('log', '📜 Logg'),
     ] %}
     {% for tab_id, tab_label in tabs %}
     <a href="{{ url_for('admin.tab', tab=tab_id) }}"
@@ -46,6 +48,459 @@
   </div>
 
   <main class="admin-main">
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: STATISTICS                                           -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'statistics' %}
+  <div class="admin-section">
+    <h2>📊 Statistikk</h2>
+
+    <!-- Overordnet statistikk -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value">{{ statistics.num_users }}</div>
+        <div class="stat-label">Påmeldte brukere</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ statistics.total_points }}</div>
+        <div class="stat-label">Totale poeng delt ut</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ statistics.avg_points }}</div>
+        <div class="stat-label">Gjennomsnitt poeng</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ statistics.avg_exact_hits }}</div>
+        <div class="stat-label">Gj.sn. eksakte tips</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ statistics.avg_hub_hits }}</div>
+        <div class="stat-label">Gj.sn. HUB tips</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ statistics.group_accuracy }}%</div>
+        <div class="stat-label">Gruppe-nøyaktighet</div>
+      </div>
+    </div>
+
+    <!-- KO-nøyaktighet -->
+    <div class="stats-grid">
+      <div class="stat-card stat-card-secondary">
+        <div class="stat-value">{{ statistics.ko_accuracy }}%</div>
+        <div class="stat-label">KO-nøyaktighet</div>
+      </div>
+      <div class="stat-card stat-card-secondary">
+        <div class="stat-value">{{ statistics.exact_count }}</div>
+        <div class="stat-label">Totale eksakte (samlet)</div>
+      </div>
+      <div class="stat-card stat-card-secondary">
+        <div class="stat-value">{{ statistics.hub_only_count }}</div>
+        <div class="stat-label">HUB-bare (samlet)</div>
+      </div>
+    </div>
+
+    <!-- Grafer -->
+    <div class="admin-card" style="margin-top: 20px;">
+      <h3>Poengfordeling etter kategori</h3>
+      <p class="chart-description">Totale poeng delt ut per kategori (gruppe eksakt, HUB, vinner osv.). Viser hvilke poengtyper som har bidratt mest til det totale poengmengden.</p>
+      <canvas id="scoreDistributionChart" style="max-height: 400px;"></canvas>
+    </div>
+
+    <div class="admin-card" style="margin-top: 20px;">
+      <h3>Prediksjonsfordeling (eksakt vs HUB)</h3>
+      <p class="chart-description">Antall tips som var eksakte (riktig resultat), HUB-bare (riktig vinner/uavgjort, men feil score), eller helt feil. Høyere eksakte tips indikerer sterkere tippers.</p>
+      <canvas id="predictionAccuracyChart" style="max-height: 350px;"></canvas>
+    </div>
+
+    <div class="admin-card" style="margin-top: 20px;">
+      <h3>Poengfordeling blant brukere</h3>
+      <p class="chart-description">Viser hvor mange brukere som ligger i hver poengkategori. Denne grafen hjelper deg å se hvor polarisert eller jevn konkurransen er blant deltakere.</p>
+      <canvas id="pointRangesChart" style="max-height: 400px;"></canvas>
+    </div>
+
+    <div class="admin-card" style="margin-top: 20px;">
+      <h3>🏆 Scoreboard - Alle brukere (poengfordeling)</h3>
+      <p class="chart-description">Oversikt over alle brukere med stablede poengtyper. Holder musa over for å se fullstendig fordeling per bruker.</p>
+      <canvas id="adminLeaderboardChart" style="max-height: 500px;"></canvas>
+    </div>
+
+    <!-- Top 10 og Bottom 10 -->
+    <div class="stats-two-column">
+      <div class="admin-card">
+        <h3>🏆 Top 10 brukere</h3>
+        {% if statistics.top_users %}
+        <table class="admin-table small-table">
+          <thead><tr><th>#</th><th>Navn</th><th>Eksakt</th><th>HUB</th><th>Poeng</th></tr></thead>
+          <tbody>
+            {% for entry in statistics.top_users %}
+            <tr>
+              <td>{{ entry.rank }}</td>
+              <td>{{ entry.user.name }}</td>
+              <td>{{ entry.exact_hits }}</td>
+              <td>{{ entry.hub_hits }}</td>
+              <td><strong>{{ entry.points }}</strong></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Ingen data.</p>
+        {% endif %}
+      </div>
+
+      <div class="admin-card">
+        <h3>🎯 Bottom 10 brukere</h3>
+        {% if statistics.bottom_users %}
+        <table class="admin-table small-table">
+          <thead><tr><th>#</th><th>Navn</th><th>Eksakt</th><th>HUB</th><th>Poeng</th></tr></thead>
+          <tbody>
+            {% for entry in statistics.bottom_users %}
+            <tr>
+              <td>{{ statistics.num_users - loop.index + 1 }}</td>
+              <td>{{ entry.user.name }}</td>
+              <td>{{ entry.exact_hits }}</td>
+              <td>{{ entry.hub_hits }}</td>
+              <td><strong>{{ entry.points }}</strong></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p>Ingen data.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script>
+      // Poengfordeling etter kategori
+      const categoryLabels = [
+        'Gruppe eksakt',
+        'Gruppe HUB',
+        'Gruppe vinner',
+        'Gruppe 2. plass',
+        'Gruppe videre',
+        'KO eksakt',
+        'KO videre',
+        'KO finalist',
+        'KO mester',
+      ];
+      const categoryData = [
+        {{ statistics.score_distribution.get('group_exact', 0) }},
+        {{ statistics.score_distribution.get('group_hub', 0) }},
+        {{ statistics.score_distribution.get('group_winner', 0) }},
+        {{ statistics.score_distribution.get('group_second', 0) }},
+        {{ statistics.score_distribution.get('knockout_exact', 0) }},
+        {{ statistics.score_distribution.get('knockout_advance', 0) }},
+        {{ statistics.score_distribution.get('knockout_finalist', 0) }},
+        {{ statistics.score_distribution.get('knockout_champion', 0) }},
+      ];
+
+      const colors = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+        '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B88B'
+      ];
+
+      new Chart(document.getElementById('scoreDistributionChart'), {
+        type: 'bar',
+        data: {
+          labels: categoryLabels,
+          datasets: [{
+            label: 'Poeng delt ut',
+            data: categoryData,
+            backgroundColor: colors,
+            borderColor: colors,
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: true }
+          },
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+
+      // Prediksjonsfordeling
+      new Chart(document.getElementById('predictionAccuracyChart'), {
+        type: 'bar',
+        data: {
+          labels: ['Eksakt', 'HUB (bare)', 'Ingenting'],
+          datasets: [{
+            label: 'Antall tips',
+            data: [
+              {{ statistics.exact_count }},
+              {{ statistics.hub_only_count }},
+              {{ statistics.no_match_count }}
+            ],
+            backgroundColor: ['#2ECC71', '#3498DB', '#E74C3C'],
+            borderColor: ['#27AE60', '#2980B9', '#C0392B'],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: true }
+          },
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+
+      // Poengfordeling blant brukere
+      const pointRangeLabels = [
+        '0-20 poeng\n({{ statistics.point_ranges.get("0-20", 0) }} brukere)',
+        '20-50 poeng\n({{ statistics.point_ranges.get("20-50", 0) }} brukere)',
+        '50-100 poeng\n({{ statistics.point_ranges.get("50-100", 0) }} brukere)',
+        '100-150 poeng\n({{ statistics.point_ranges.get("100-150", 0) }} brukere)',
+        '150+ poeng\n({{ statistics.point_ranges.get("150+", 0) }} brukere)'
+      ];
+
+      new Chart(document.getElementById('pointRangesChart'), {
+        type: 'doughnut',
+        data: {
+          labels: pointRangeLabels,
+          datasets: [{
+            data: [
+              {{ statistics.point_ranges.get('0-20', 0) }},
+              {{ statistics.point_ranges.get('20-50', 0) }},
+              {{ statistics.point_ranges.get('50-100', 0) }},
+              {{ statistics.point_ranges.get('100-150', 0) }},
+              {{ statistics.point_ranges.get('150+', 0) }}
+            ],
+            backgroundColor: ['#FF6B6B', '#FFA07A', '#F7DC6F', '#98D8C8', '#4ECDC4'],
+            borderColor: '#fff',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { position: 'bottom' },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const dataset = context.dataset;
+                  const total = dataset.data.reduce((a, b) => a + b, 0);
+                  const percentage = Math.round((context.parsed * 100) / total);
+                  return context.label.split('\n')[0] + ': ' + context.parsed + ' brukere (' + percentage + '%)';
+                }
+              }
+            }
+          }
+        }
+      });
+
+      // Admin Scoreboard Chart (stacked by category)
+      const sbLabels = [
+        {% for entry in scoreboard %}
+          '{{ entry.user.name }}',
+        {% endfor %}
+      ];
+
+      const sbBreakdowns = [
+        {% for entry in scoreboard %}
+        {
+          group_hub: {{ entry.breakdown.get('group_hub', 0) }},
+          group_exact: {{ entry.breakdown.get('group_exact', 0) }},
+          group_winner: {{ entry.breakdown.get('group_winner', 0) }},
+          group_second: {{ entry.breakdown.get('group_second', 0) }},
+          knockout_exact: {{ entry.breakdown.get('knockout_exact', 0) }},
+          knockout_advance: {{ entry.breakdown.get('knockout_advance', 0) }},
+          knockout_finalist: {{ entry.breakdown.get('knockout_finalist', 0) }},
+          knockout_champion: {{ entry.breakdown.get('knockout_champion', 0) }}
+        },
+        {% endfor %}
+      ];
+
+      const sbPoints = [{{ scoreboard | map(attribute='points') | join(',') }}];
+
+      const adminCategoryDefs = [
+        { key: 'group_hub', label: 'HUB (gruppe)', color: '#3B82F6' },
+        { key: 'group_exact', label: 'Eksakt (gruppe)', color: '#10B981' },
+        { key: 'group_winner', label: 'Gruppevinner', color: '#F59E0B' },
+        { key: 'group_second', label: 'Andreplass', color: '#F97316' },
+        { key: 'knockout_exact', label: 'Eksakt (KO)', color: '#22C55E' },
+        { key: 'knockout_advance', label: 'KO videre', color: '#6366F1' },
+        { key: 'knockout_finalist', label: 'Finalist', color: '#A855F7' },
+        { key: 'knockout_champion', label: 'Verdensmester', color: '#EF4444' }
+      ];
+
+      const sbAdminDatasets = adminCategoryDefs.map((cat) => ({
+        label: cat.label,
+        data: sbBreakdowns.map((b) => b[cat.key] || 0),
+        backgroundColor: cat.color,
+        borderColor: cat.color,
+        borderWidth: 0,
+        stack: 'points'
+      }));
+
+      new Chart(document.getElementById('adminLeaderboardChart'), {
+        type: 'bar',
+        data: {
+          labels: sbLabels,
+          datasets: sbAdminDatasets
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: true, position: 'bottom' },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.x} p`,
+                afterBody: (items) => {
+                  if (!items || !items.length) return [];
+                  const i = items[0].dataIndex;
+                  const b = sbBreakdowns[i] || {};
+                  const groupExact = b.group_exact || 0;
+                  const koExact = b.knockout_exact || 0;
+                  const exactTotal = groupExact + koExact;
+                  const lines = [
+                    ' ',
+                    'Poengfordeling:',
+                    `HUB (gruppe): ${b.group_hub || 0} p`,
+                    `Eksakt (gruppe): ${groupExact} p`,
+                    `Eksakt (KO): ${koExact} p`
+                  ];
+                  if (exactTotal > 0) lines.push(`Eksakt (sum): ${exactTotal} p`);
+                  if (b.group_winner) lines.push(`Gruppevinner: ${b.group_winner} p`);
+                  if (b.group_second) lines.push(`Andreplass: ${b.group_second} p`);
+                  if (b.knockout_advance) lines.push(`KO videre: ${b.knockout_advance} p`);
+                  if (b.knockout_finalist) lines.push(`Finalist: ${b.knockout_finalist} p`);
+                  if (b.knockout_champion) lines.push(`Verdensmester: ${b.knockout_champion} p`);
+                  lines.push(' ', `Totalt: ${sbPoints[i]} poeng`);
+                  return lines;
+                }
+              }
+            }
+          },
+          scales: {
+            x: { beginAtZero: true, stacked: true },
+            y: { stacked: true }
+          }
+        }
+      });
+    </script>
+  </div>
+  {% endif %}
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <!-- TAB: LOG                                                  -->
+  <!-- ══════════════════════════════════════════════════════════ -->
+  {% if active_tab == 'log' %}
+  <div class="admin-section">
+    <h2>📜 Aktivitetslogg</h2>
+    <div class="admin-card">
+      <div class="log-header">
+        <span class="log-live-dot" id="logLiveDot">● Live</span>
+        <span class="log-count" id="logCount">{{ audit_logs | length }} hendelser</span>
+        <a href="{{ url_for('admin.export_log_csv') }}" class="btn btn-sm btn-outline">⬇ Eksporter logg (CSV)</a>
+        <button class="btn btn-sm btn-outline" onclick="clearLogDisplay()">🗑 Tøm visning</button>
+      </div>
+      <div class="log-feed" id="logFeed">
+        {% for entry in audit_logs %}
+        <div class="log-entry log-entry--{{ entry.action | replace('_','-') }}" data-id="{{ entry.id }}">
+          <span class="log-time">{{ entry.created_at.strftime('%d.%m %H:%M:%S') if entry.created_at else '' }}</span>
+          <span class="log-action">{{ entry.action }}</span>
+          {% if entry.details %}
+          <span class="log-details">{{ entry.details }}</span>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="log-empty">Ingen hendelser ennå.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    const feed = document.getElementById('logFeed');
+    const countEl = document.getElementById('logCount');
+    const dotEl = document.getElementById('logLiveDot');
+    let maxId = {{ audit_logs[0].id if audit_logs else 0 }};
+    let totalShown = {{ audit_logs | length }};
+    let cleared = false;
+
+    const actionLabels = {
+      'admin_login': '🔐 Innlogging',
+      'save_result': '⚽ Kampresultat lagret',
+      'quick_update_match': '⚡ Rask kamp-oppdatering',
+      'save_knockout_result': '🏆 KO-resultat lagret',
+      'reset_knockout': '🔄 Sluttspill tilbakestilt',
+      'reset_user_tips': '🔄 Brukertips slettet',
+      'reset_users': '🔄 Brukere slettet',
+      'export_backup_json': '💾 Backup eksportert',
+      'export_database': '💾 Database lastet ned',
+      'cleanup_expired_invites': '🧹 Utgåtte invitasjoner slettet',
+      'generate_invite': '📱 Invitasjon generert',
+      'generate_invite_pdf': '📄 Invitasjons-PDF generert',
+      'auto_fill_bracket': '🔀 Bracket oppdatert',
+      'fill_round_of_32': '🔀 Runde av 32 fylt inn',
+      'recalculate_scores': '🔢 Poeng reberegnet',
+    };
+
+    function formatAction(a) {
+      return actionLabels[a] || a;
+    }
+
+    function createEntry(e) {
+      const div = document.createElement('div');
+      div.className = 'log-entry log-entry--new';
+      div.dataset.id = e.id;
+      div.innerHTML =
+        '<span class="log-time">' + e.created_at + '</span>' +
+        '<span class="log-action">' + formatAction(e.action) + '</span>' +
+        (e.details ? '<span class="log-details">' + e.details + '</span>' : '');
+      return div;
+    }
+
+    async function poll() {
+      try {
+        const resp = await fetch('{{ url_for("admin.log_feed") }}?since=' + maxId);
+        const entries = await resp.json();
+        if (entries.length > 0) {
+          if (cleared) {
+            feed.innerHTML = '';
+            cleared = false;
+          }
+          entries.forEach(e => {
+            if (e.id > maxId) maxId = e.id;
+            const el = createEntry(e);
+            feed.insertBefore(el, feed.firstChild);
+            totalShown++;
+            setTimeout(() => el.classList.remove('log-entry--new'), 2000);
+          });
+          countEl.textContent = totalShown + ' hendelser';
+        }
+        dotEl.style.color = '#10B981';
+      } catch(err) {
+        dotEl.style.color = '#EF4444';
+      }
+    }
+
+    window.clearLogDisplay = function() {
+      feed.innerHTML = '<div class="log-empty">Visning tømt – nye hendelser vises fortløpende.</div>';
+      cleared = true;
+      totalShown = 0;
+      countEl.textContent = '0 hendelser';
+    };
+
+    setInterval(poll, 6000);
+  })();
+  </script>
+  {% endif %}
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <!-- TAB: GROUPS                                               -->
@@ -106,7 +561,7 @@
           <span class="match-teams-txt">
             {{ match.home_team.name if match.home_team else '?' }} vs {{ match.away_team.name if match.away_team else '?' }}
           </span>
-          {% if match.kickoff_at_utc %}<span class="match-time-txt">{{ match.kickoff_at_utc | oslo_time }}</span>{% endif %}
+          {% if match.kickoff_at_utc %}<span class="match-time-txt">{{ match.kickoff_at_utc | oslo_datetime }}</span>{% endif %}
 
           <form method="POST" action="{{ url_for('admin.save_match_result', match_id=match.id) }}" class="result-form">
             <input type="hidden" name="next_tab" value="groups">
@@ -235,12 +690,14 @@
         <button type="submit" class="btn btn-primary">🔄 Reberegn alle poeng</button>
       </form>
       <a href="{{ url_for('admin.export_users') }}" class="btn btn-outline">⬇ Eksporter CSV</a>
+      <a href="{{ url_for('admin.export_backup_json') }}" class="btn btn-outline">⬇ Last ned backup (JSON)</a>
+      <a href="{{ url_for('admin.export_database') }}" class="btn btn-outline">💾 Last ned database</a>
     </div>
 
     {% if scoreboard %}
     <table class="admin-table">
       <thead>
-        <tr><th>#</th><th>Navn</th><th>E-post</th><th>Registrert</th><th>Sist aktiv</th><th>Poeng</th><th>Betalt</th><th>Aktiv</th><th>Handling</th></tr>
+        <tr><th>#</th><th>Navn</th><th>E-post</th><th>Registrert</th><th>Sist aktiv</th><th>Eksakt</th><th>HUB</th><th>Poeng</th><th>Betalt</th><th>Aktiv</th><th>Handling</th></tr>
       </thead>
       <tbody>
         {% for entry in scoreboard %}
@@ -250,6 +707,8 @@
           <td>{{ entry.user.email or '-' }}</td>
           <td>{{ entry.user.created_at.strftime('%d.%m.%Y') if entry.user.created_at else '-' }}</td>
           <td>{{ entry.user.last_seen_at.strftime('%d.%m.%Y') if entry.user.last_seen_at else '-' }}</td>
+          <td><strong>{{ entry.exact_hits }}</strong></td>
+          <td><strong>{{ entry.hub_hits }}</strong></td>
           <td><strong>{{ entry.points }}</strong></td>
           <td>{{ '✅' if entry.user.has_paid else '❌' }}</td>
           <td>{{ '✅' if entry.user.is_active else '❌' }}</td>
@@ -379,7 +838,6 @@
           'group_exact': 'Eksakt resultat (gruppe)',
           'group_winner': 'Riktig gruppevinner',
           'group_second': 'Riktig andreplass',
-          'group_advance': 'Riktig lag videre fra gruppe',
           'knockout_exact': 'Eksakt resultat (sluttspill)',
           'knockout_advance': 'Riktig lag videre (sluttspill)',
           'knockout_finalist': 'Riktig finalist',
@@ -460,14 +918,28 @@
           {% else %}
             {% set row_style = '' %}
           {% endif %}
-          <tr style="{{ row_style }}">
+          <tr class="match-row-clickable"
+              style="{{ row_style }}"
+              data-match-id="{{ m.id }}"
+              data-match-number="{{ m.match_number }}"
+              data-phase="{{ m.phase }}"
+              data-round="{{ m.round_name | replace('_', ' ') | title }}"
+              data-group="{{ m.group.name if m.group else '-' }}"
+              data-kickoff="{{ m.kickoff_at_oslo_cache.replace(' ', 'T') if m.kickoff_at_oslo_cache else '' }}"
+              data-home="{{ home_name }}"
+              data-away="{{ away_name }}"
+              data-home-score="{{ m.home_score if m.home_score is not none else '' }}"
+              data-away-score="{{ m.away_score if m.away_score is not none else '' }}"
+              data-is-finished="{{ 1 if m.is_finished else 0 }}"
+              data-result-note="{{ m.result_note or '' }}"
+              title="Dobbeltklikk for å redigere">
             <td><strong>{{ m.match_number }}</strong></td>
             <td>{{ 'Gruppe' if m.phase == 'group' else 'Sluttspill' }}</td>
             <td style="white-space:nowrap">{{ m.round_name | replace('_', ' ') | title }}</td>
             <td>{{ m.group.name if m.group else '-' }}</td>
-            <td style="white-space:nowrap">{{ m.kickoff_at_utc | oslo_time if m.kickoff_at_utc else '-' }}</td>
+            <td class="js-kickoff" style="white-space:nowrap">{{ m.kickoff_at_utc | oslo_time if m.kickoff_at_utc else '-' }}</td>
             <td>{{ home_name }}</td>
-            <td style="text-align:center;font-weight:700">
+            <td class="js-result" style="text-align:center;font-weight:700">
               {% if m.home_score is not none and m.away_score is not none %}
                 {{ m.home_score }} – {{ m.away_score }}
               {% else %}
@@ -477,7 +949,7 @@
             <td>{{ away_name }}</td>
             <td>{{ m.venue or '-' }}</td>
             <td>{{ m.city or '-' }}</td>
-            <td>
+            <td class="js-status">
               {% if m.is_finished %}
                 <span class="status-badge badge-finished">Ferdig</span>
               {% elif m.effective_locked %}
@@ -490,6 +962,52 @@
         {% endfor %}
         </tbody>
       </table>
+    </div>
+
+    <div id="match-edit-modal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="match-edit-title">Rediger kamp</h3>
+          <button type="button" class="btn btn-xs btn-outline" id="match-edit-close">Lukk</button>
+        </div>
+        <p id="match-edit-meta" class="admin-user-sub"></p>
+        <form id="match-edit-form" class="join-form" style="margin-top:10px;">
+          <input type="hidden" name="match_id" id="match-edit-id">
+
+          <div class="match-preview">
+            <div class="team-pill" id="match-edit-home"></div>
+            <div class="vs-text-big">VS</div>
+            <div class="team-pill" id="match-edit-away"></div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Dato (Oslo)</label>
+              <input type="date" id="match-edit-kickoff-date" class="form-input" required>
+            </div>
+            <div class="form-group">
+              <label>Tid (Oslo)</label>
+              <input type="time" id="match-edit-kickoff-time" class="form-input" required>
+            </div>
+            <div class="form-group">
+              <label>Hjemme</label>
+              <input type="number" name="home_score" id="match-edit-home-score" min="0" max="50" class="form-input short">
+            </div>
+            <div class="form-group">
+              <label>Borte</label>
+              <input type="number" name="away_score" id="match-edit-away-score" min="0" max="50" class="form-input short">
+            </div>
+            <div class="form-group">
+              <label>Notat</label>
+              <input type="text" name="result_note" id="match-edit-note" class="form-input" placeholder="f.eks. e.o. / straffer">
+            </div>
+          </div>
+          <label class="checkbox-label" style="margin-bottom:10px;">
+            <input type="checkbox" name="is_finished" value="1" id="match-edit-finished"> Kamp ferdig
+          </label>
+          <button type="submit" class="btn btn-save" id="match-edit-save">Lagre kamp</button>
+        </form>
+      </div>
     </div>
   </div>
   {% endif %}
@@ -519,7 +1037,8 @@
   </main>
 
   <footer class="footer">
-    <p>VM 2026 Tipping Admin &copy; 2026</p>
+    <p>VM 2026 Tipping Admin &copy; 2026 - Versjon {{ app_version }}</p>
+    <p>Utviklet av Morten Tesaker</p>
   </footer>
 
 <script>
@@ -598,6 +1117,137 @@ document.addEventListener('submit', function(e) {
     if (btn) { btn.textContent = origText; btn.style.background = ''; btn.disabled = false; }
   });
 });
+
+// Match editor modal for "Alle kamper" (double-click a row)
+(function() {
+  var modal = document.getElementById('match-edit-modal');
+  if (!modal) return;
+
+  var titleEl = document.getElementById('match-edit-title');
+  var metaEl = document.getElementById('match-edit-meta');
+  var form = document.getElementById('match-edit-form');
+  var closeBtn = document.getElementById('match-edit-close');
+  var saveBtn = document.getElementById('match-edit-save');
+
+  var idEl = document.getElementById('match-edit-id');
+  var homeEl = document.getElementById('match-edit-home');
+  var awayEl = document.getElementById('match-edit-away');
+  var kickoffDateEl = document.getElementById('match-edit-kickoff-date');
+  var kickoffTimeEl = document.getElementById('match-edit-kickoff-time');
+  var homeScoreEl = document.getElementById('match-edit-home-score');
+  var awayScoreEl = document.getElementById('match-edit-away-score');
+  var noteEl = document.getElementById('match-edit-note');
+  var finishedEl = document.getElementById('match-edit-finished');
+
+  var activeRow = null;
+
+  function openModal(row) {
+    activeRow = row;
+    idEl.value = row.dataset.matchId || '';
+    homeEl.textContent = row.dataset.home || '';
+    awayEl.textContent = row.dataset.away || '';
+
+    var kickoff = row.dataset.kickoff || '';
+    if (kickoff && kickoff.indexOf('T') > -1) {
+      var parts = kickoff.split('T');
+      kickoffDateEl.value = parts[0] || '';
+      kickoffTimeEl.value = parts[1] || '';
+    } else {
+      kickoffDateEl.value = '';
+      kickoffTimeEl.value = '';
+    }
+
+    homeScoreEl.value = row.dataset.homeScore || '';
+    awayScoreEl.value = row.dataset.awayScore || '';
+    noteEl.value = row.dataset.resultNote || '';
+    finishedEl.checked = row.dataset.isFinished === '1';
+
+    titleEl.textContent = 'Rediger kamp #' + (row.dataset.matchNumber || '');
+    metaEl.textContent = (row.dataset.phase || '') + ' • ' + (row.dataset.round || '') + ' • Gruppe: ' + (row.dataset.group || '-');
+    modal.style.display = 'flex';
+  }
+
+  function closeModal() {
+    modal.style.display = 'none';
+    activeRow = null;
+  }
+
+  document.querySelectorAll('.match-row-clickable').forEach(function(row) {
+    row.addEventListener('dblclick', function() { openModal(row); });
+  });
+
+  closeBtn.addEventListener('click', closeModal);
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    if (!idEl.value) return;
+
+    if (!kickoffDateEl.value || !kickoffTimeEl.value) {
+      alert('Kampstart må ha både dato og tid.');
+      return;
+    }
+
+    var fd = new FormData();
+    fd.append('home_score', homeScoreEl.value);
+    fd.append('away_score', awayScoreEl.value);
+    var kickoffValue = kickoffDateEl.value + 'T' + kickoffTimeEl.value;
+    fd.append('kickoff_at_oslo', kickoffValue);
+    fd.append('result_note', noteEl.value);
+    if (finishedEl.checked) fd.append('is_finished', '1');
+
+    var originalText = saveBtn.textContent;
+    saveBtn.disabled = true;
+
+    fetch('/admin/match/' + idEl.value + '/quick-update', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      body: fd
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) {
+        alert(res.flash || 'Kunne ikke lagre kamp.');
+        saveBtn.disabled = false;
+        return;
+      }
+
+      if (activeRow) {
+        activeRow.dataset.kickoff = res.kickoff_value || '';
+        activeRow.dataset.homeScore = homeScoreEl.value || '';
+        activeRow.dataset.awayScore = awayScoreEl.value || '';
+        activeRow.dataset.resultNote = noteEl.value || '';
+        activeRow.dataset.isFinished = res.is_finished ? '1' : '0';
+        activeRow.style = res.row_style || '';
+
+        var kickoffCell = activeRow.querySelector('.js-kickoff');
+        if (kickoffCell) kickoffCell.textContent = res.kickoff_display || '-';
+
+        var resultCell = activeRow.querySelector('.js-result');
+        if (resultCell) resultCell.textContent = res.result_display || '–';
+
+        var statusCell = activeRow.querySelector('.js-status');
+        if (statusCell) {
+          statusCell.innerHTML = '<span class="status-badge ' + (res.status_class || 'badge-open') + '">' + (res.status_label || 'Åpen') + '</span>';
+        }
+      }
+
+      saveBtn.textContent = '✓ Lagret';
+      saveBtn.style.background = '#16a34a';
+      setTimeout(function() {
+        saveBtn.textContent = originalText;
+        saveBtn.style.background = '';
+        saveBtn.disabled = false;
+        closeModal();
+      }, 800);
+    })
+    .catch(function() {
+      saveBtn.textContent = originalText;
+      saveBtn.style.background = '';
+      saveBtn.disabled = false;
+      alert('Nettverksfeil ved lagring.');
+    });
+  });
+})();
 </script>
 </body>
 </html>

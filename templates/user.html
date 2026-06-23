@@ -25,6 +25,7 @@
   <!-- TAB: GROUP STAGE -->
   {% if active_tab == 'group' %}
   <div class="tab-content">
+    <div class="progress-summary">{{ group_tipped_matches or 0 }} av {{ group_total_matches or 0 }} kamper er tippet</div>
     {% if group_data %}
       {% for gd in group_data %}
       {% set group = gd.group %}
@@ -140,7 +141,7 @@
             <div class="match-meta">
               <span class="match-number">#{{ match.match_number }}</span>
               {% if match.kickoff_at_utc %}
-              <span class="match-time">{{ match.kickoff_at_utc | oslo_time }}</span>
+              <span class="match-time">{{ match.kickoff_at_utc | oslo_datetime }}</span>
               {% endif %}
               {% if match.venue %}<span class="match-venue">{{ match.venue }}</span>{% endif %}
             </div>
@@ -219,6 +220,24 @@
   <!-- TAB: KNOCKOUT -->
   {% if active_tab == 'knockout' %}
   <div class="tab-content">
+
+    <div class="knockout-rules-notice">
+      <div class="knockout-rules-icon">ℹ️</div>
+      <div class="knockout-rules-text">
+        <strong>Slik tippes sluttspillet:</strong>
+        <p>I sluttspillkampene tippes eksakt resultat etter ferdigspilt kamp, inkludert ekstraomganger dersom de spilles.</p>
+        <p><strong>Straffesparkkonkurranse regnes ikke med i resultatet.</strong></p>
+        <p>I tillegg tippes hvilket lag som går videre.</p>
+        <p><strong>Det tippes ikke HUB i sluttspillet.</strong></p>
+        <div class="knockout-rules-table">
+          <div class="knockout-rule-row"><span class="knockout-rule-field">Eksakt resultat:</span><span class="knockout-rule-desc">Resultatet etter ordinær tid, eller etter ekstraomganger hvis de spilles. Straffer teller ikke med.</span></div>
+          <div class="knockout-rule-row"><span class="knockout-rule-field">Lag videre:</span><span class="knockout-rule-desc">Laget som går videre i turneringen.</span></div>
+          <div class="knockout-rule-row"><span class="knockout-rule-field">HUB:</span><span class="knockout-rule-desc">Brukes ikke i sluttspill.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="progress-summary">{{ knockout_tipped_matches or 0 }} av {{ knockout_total_matches or 0 }} kamper er tippet</div>
     {% set round_labels = {
       'round_of_32': 'Round of 32',
       'round_of_16': 'Åttendedelsfinale',
@@ -352,10 +371,63 @@
   <!-- TAB: STATS -->
   {% if active_tab == 'stats' %}
   <div class="tab-content">
+
+    <!-- Rangeringsvisualisering -->
+    {% if user_rank and scoreboard %}
+    {% set total_players = scoreboard | length %}
+    {% set rank_pct = ((total_players - user_rank) / total_players * 100) | round(0) | int if total_players > 1 else 100 %}
+    {% set pts_max = comp_stats.max_points if comp_stats and comp_stats.max_points else total_points %}
+    {% set pts_pct = ((total_points / pts_max) * 100) | round(0) | int if pts_max > 0 else 0 %}
+    {% set gap_to_top = (pts_max - total_points) if pts_max else 0 %}
+    {% set gap_to_next = 0 %}
+    {% for entry in scoreboard %}
+      {% if entry.rank == user_rank - 1 %}
+        {% set gap_to_next = entry.points - total_points %}
+      {% endif %}
+    {% endfor %}
+
+    <div class="rank-hero">
+      <div class="rank-badge
+        {% if user_rank == 1 %}rank-gold
+        {% elif user_rank == 2 %}rank-silver
+        {% elif user_rank == 3 %}rank-bronze
+        {% else %}rank-normal{% endif %}">
+        {% if user_rank == 1 %}🥇{% elif user_rank == 2 %}🥈{% elif user_rank == 3 %}🥉{% else %}#{{ user_rank }}{% endif %}
+      </div>
+      <div class="rank-details">
+        <div class="rank-name">{{ user.name }}</div>
+        <div class="rank-sub">{{ total_points }} poeng &nbsp;·&nbsp; {{ user_rank }}. plass av {{ total_players }}</div>
+        {% if gap_to_top > 0 %}
+        <div class="rank-sub rank-gap">{{ gap_to_top }} poeng bak ledelsen</div>
+        {% else %}
+        <div class="rank-sub rank-leader">🏆 Du leder!</div>
+        {% endif %}
+      </div>
+      <div class="rank-percentile">
+        <div class="percentile-ring" style="--pct: {{ rank_pct }}">
+          <span class="percentile-value">Top<br>{{ 100 - rank_pct }}%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fremdriftslinje poeng vs topp -->
+    <div class="rank-progress-card">
+      <div class="rank-progress-label">
+        <span>Dine poeng</span>
+        <span>{{ total_points }} / {{ pts_max }} p</span>
+      </div>
+      <div class="rank-progress-bar">
+        <div class="rank-progress-fill" style="width: {{ [pts_pct, 100] | min }}%">
+          <span class="rank-progress-pct">{{ pts_pct }}%</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="stats-grid">
       <!-- My stats card -->
       <div class="stats-card">
-        <h3>🏅 Mine poeng</h3>
+        <h3>🏅 Mine poeng <button type="button" class="info-dot" data-info="Viser total poengsum og plassering akkurat nå.">•</button></h3>
         <div class="big-number">{{ total_points }}</div>
         <div class="sub-label">Plassering: {{ user_rank }}. plass</div>
         {% if comp_stats %}
@@ -365,7 +437,7 @@
 
       <!-- Prize pool card -->
       <div class="stats-card">
-        <h3>💰 Premiepott</h3>
+        <h3>💰 Premiepott <button type="button" class="info-dot" data-info="Beregnes fra antall deltakere og innskudd. Dette oppdateres automatisk.">•</button></h3>
         <div class="big-number">{{ prize_pool }} kr</div>
         <div class="sub-label">{{ prize_summary.participants if prize_summary else 0 }} deltagere</div>
       </div>
@@ -374,13 +446,12 @@
     <!-- Score breakdown -->
     {% if breakdown %}
     <div class="breakdown-card">
-      <h3>📊 Poengfordeling</h3>
+      <h3>📊 Poengfordeling <button type="button" class="info-dot" data-info="Viser hvordan totalpoengene dine er fordelt på ulike kategorier.">•</button></h3>
       {% set score_labels = {
         'group_hub': 'Riktig HUB (gruppespill)',
         'group_exact': 'Eksakt resultat (gruppespill)',
         'group_winner': 'Riktig gruppevinner',
         'group_second': 'Riktig andreplass',
-        'group_advance': 'Riktig lag videre fra gruppe',
         'knockout_exact': 'Eksakt resultat (sluttspill)',
         'knockout_advance': 'Riktig lag videre (sluttspill)',
         'knockout_finalist': 'Riktig finalist',
@@ -404,7 +475,7 @@
     <!-- User statistics -->
     {% if user_stats %}
     <div class="breakdown-card">
-      <h3>📈 Min statistikk</h3>
+      <h3>📈 Min statistikk <button type="button" class="info-dot" data-info="Oppsummering av treffsikkerhet og prestasjon på dine tips.">•</button></h3>
       <table class="breakdown-table">
         <tr><td>Riktige HUB</td><td>{{ user_stats.correct_hub }}</td></tr>
         <tr><td>Eksakte resultater (gruppe)</td><td>{{ user_stats.correct_exact_group }}</td></tr>
@@ -412,8 +483,8 @@
         <tr><td>Riktige gruppevinnere</td><td>{{ user_stats.correct_group_winners }}</td></tr>
         <tr><td>Riktige lag videre (sluttspill)</td><td>{{ user_stats.correct_advance }}</td></tr>
         <tr><td>Perfekte tipping totalt</td><td>{{ user_stats.perfect_total }}</td></tr>
-        <tr><td>Treffprosent</td><td>{{ user_stats.hit_rate }}%</td></tr>
-        <tr><td>Gjensnittlig poeng per kamp</td><td>{{ user_stats.avg_points_per_match }}</td></tr>
+        <tr><td>Treffprosent <button type="button" class="info-dot" data-info="Andel kamper der du har truffet HUB eller eksakt resultat.">•</button></td><td>{{ user_stats.hit_rate }}%</td></tr>
+        <tr><td>Gjennomsnittlig poeng per kamp <button type="button" class="info-dot" data-info="Totale poeng delt på antall ferdigspilte kamper.">•</button></td><td>{{ user_stats.avg_points_per_match }}</td></tr>
       </table>
     </div>
     {% endif %}
@@ -421,7 +492,7 @@
     <!-- General statistics -->
     {% if comp_stats %}
     <div class="breakdown-card">
-      <h3>🌍 Generell statistikk</h3>
+      <h3>🌍 Generell statistikk <button type="button" class="info-dot" data-info="Nøkkeltall for hele konkurransen, basert på alle aktive brukere.">•</button></h3>
       <table class="breakdown-table">
         <tr><td>Gjennomsnittspoeng</td><td>{{ comp_stats.avg_points }}</td></tr>
         <tr><td>Høyeste poengsum</td><td>{{ comp_stats.max_points }}</td></tr>
@@ -435,15 +506,23 @@
     </div>
     {% endif %}
 
-    <!-- Scoreboard -->
+    <!-- Scoreboard med graf -->
     {% if scoreboard %}
     <div class="scoreboard-card">
-      <h3>🏆 Scoreboard</h3>
+      <h3>🏆 Scoreboard <button type="button" class="info-dot" data-info="Rangering av spillere etter total poengsum.">•</button></h3>
+
+      <!-- Horisontal bar chart -->
+      <div style="margin-bottom: 20px;">
+        <canvas id="leaderboardChart" style="max-height: 300px;"></canvas>
+      </div>
+
       <table class="scoreboard-table">
         <thead>
           <tr>
             <th>#</th>
             <th>Spiller</th>
+            <th>Eksakt (p)</th>
+            <th>HUB (p)</th>
             <th>Poeng</th>
           </tr>
         </thead>
@@ -458,6 +537,8 @@
                 {{ entry.user.anonymous_label or ('Spiller ' ~ loop.index) }}
               {% endif %}
             </td>
+            <td class="points-cell">{{ entry.exact_points }}</td>
+            <td class="points-cell">{{ entry.hub_points }}</td>
             <td class="points-cell">{{ entry.points }}</td>
           </tr>
           {% endfor %}
@@ -465,6 +546,104 @@
       </table>
     </div>
     {% endif %}
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script>
+    {% if scoreboard %}
+    const sbLabels = [
+      {% for entry in scoreboard %}
+        {% if entry.user.id == user.id %}
+          '{{ entry.user.name }} (deg)',
+        {% else %}
+          '{{ entry.user.anonymous_label or 'Spiller ' ~ loop.index }}',
+        {% endif %}
+      {% endfor %}
+    ];
+    const sbPoints = [{{ scoreboard | map(attribute='points') | join(',') }}];
+    const sbBreakdowns = [
+      {% for entry in scoreboard %}
+      {
+        group_hub: {{ entry.breakdown.get('group_hub', 0) }},
+        group_exact: {{ entry.breakdown.get('group_exact', 0) }},
+        group_winner: {{ entry.breakdown.get('group_winner', 0) }},
+        group_second: {{ entry.breakdown.get('group_second', 0) }},
+        knockout_exact: {{ entry.breakdown.get('knockout_exact', 0) }},
+        knockout_advance: {{ entry.breakdown.get('knockout_advance', 0) }},
+        knockout_finalist: {{ entry.breakdown.get('knockout_finalist', 0) }},
+        knockout_champion: {{ entry.breakdown.get('knockout_champion', 0) }}
+      },
+      {% endfor %}
+    ];
+
+    const categoryDefs = [
+      { key: 'group_hub', label: 'HUB (gruppe)', color: '#3B82F6' },
+      { key: 'group_exact', label: 'Eksakt (gruppe)', color: '#10B981' },
+      { key: 'group_winner', label: 'Gruppevinner', color: '#F59E0B' },
+      { key: 'group_second', label: 'Andreplass', color: '#F97316' },
+      { key: 'knockout_exact', label: 'Eksakt (KO)', color: '#22C55E' },
+      { key: 'knockout_advance', label: 'KO videre', color: '#6366F1' },
+      { key: 'knockout_finalist', label: 'Finalist', color: '#A855F7' },
+      { key: 'knockout_champion', label: 'Verdensmester', color: '#EF4444' }
+    ];
+
+    const sbDatasets = categoryDefs.map((cat) => ({
+      label: cat.label,
+      data: sbBreakdowns.map((b) => b[cat.key] || 0),
+      backgroundColor: cat.color,
+      borderColor: cat.color,
+      borderWidth: 0,
+      stack: 'points'
+    }));
+
+    new Chart(document.getElementById('leaderboardChart'), {
+      type: 'bar',
+      data: {
+        labels: sbLabels,
+        datasets: sbDatasets
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.x} p`,
+              afterBody: (items) => {
+                if (!items || !items.length) return [];
+                const i = items[0].dataIndex;
+                const b = sbBreakdowns[i] || {};
+                const groupExact = b.group_exact || 0;
+                const koExact = b.knockout_exact || 0;
+                const exactTotal = groupExact + koExact;
+                const lines = [
+                  ' ',
+                  'Poengfordeling:',
+                  `HUB (gruppe): ${b.group_hub || 0} p`,
+                  `Eksakt (gruppe): ${groupExact} p`,
+                  `Eksakt (KO): ${koExact} p`
+                ];
+                if (exactTotal > 0) lines.push(`Eksakt (sum): ${exactTotal} p`);
+                if (b.group_winner) lines.push(`Gruppevinner: ${b.group_winner} p`);
+                if (b.group_second) lines.push(`Andreplass: ${b.group_second} p`);
+                if (b.knockout_advance) lines.push(`KO videre: ${b.knockout_advance} p`);
+                if (b.knockout_finalist) lines.push(`Finalist: ${b.knockout_finalist} p`);
+                if (b.knockout_champion) lines.push(`Verdensmester: ${b.knockout_champion} p`);
+                lines.push(' ', `Totalt: ${sbPoints[i]} poeng`);
+                return lines;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { beginAtZero: true, stacked: true },
+          y: { stacked: true }
+        }
+      }
+    });
+    {% endif %}
+    </script>
   </div>
   {% endif %}
 
@@ -508,7 +687,6 @@
         <li>Eksakt resultat (gruppespill): {{ score_settings.get('group_exact', 0) }} p</li>
         <li>Riktig gruppevinner: {{ score_settings.get('group_winner', 0) }} p</li>
         <li>Riktig andreplass: {{ score_settings.get('group_second', 0) }} p</li>
-        <li>Riktig lag videre fra gruppe: {{ score_settings.get('group_advance', 0) }} p</li>
         <li>Eksakt resultat (sluttspill): {{ score_settings.get('knockout_exact', 0) }} p</li>
         <li>Riktig lag videre (sluttspill): {{ score_settings.get('knockout_advance', 0) }} p</li>
         <li>Riktig finalist: {{ score_settings.get('knockout_finalist', 0) }} p</li>
@@ -569,6 +747,13 @@ document.addEventListener('submit', function(e) {
   .then(function(r) { return r.json(); })
   .then(function(res) {
     if (res.ok) {
+      if (form.classList.contains('predict-form')) {
+        var card = form.closest('.match-card');
+        if (card) {
+          card.classList.remove('match-open', 'match-locked', 'match-wrong', 'match-hub', 'match-exact', 'match-finished');
+          card.classList.add('match-predicted');
+        }
+      }
       if (btn) {
         btn.textContent = 'Lagre';
         btn.style.background = '#16a34a';
@@ -619,5 +804,42 @@ function updateLockCountdowns() {
 
 updateLockCountdowns();
 setInterval(updateLockCountdowns, 1000);
+
+// ── Info dots (click for explanation) ─────────────────────
+(function () {
+  var popover = document.createElement('div');
+  popover.className = 'info-popover';
+  popover.style.display = 'none';
+  document.body.appendChild(popover);
+
+  function hidePopover() {
+    popover.style.display = 'none';
+  }
+
+  document.addEventListener('click', function (e) {
+    var dot = e.target.closest('.info-dot');
+    if (!dot) {
+      if (!e.target.closest('.info-popover')) hidePopover();
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    var text = dot.getAttribute('data-info') || 'Ingen beskrivelse.';
+    popover.textContent = text;
+    popover.style.display = 'block';
+
+    var rect = dot.getBoundingClientRect();
+    var top = rect.bottom + window.scrollY + 8;
+    var left = rect.left + window.scrollX - 8;
+    popover.style.top = top + 'px';
+    popover.style.left = left + 'px';
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') hidePopover();
+  });
+})();
 </script>
 {% endblock %}

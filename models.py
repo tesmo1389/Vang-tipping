@@ -14,6 +14,23 @@ def now_utc():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def cleanup_expired_invites():
+    """Delete invitations that are older than 7 days and have not been used."""
+    expiry_date = now_utc() - timedelta(days=7)
+    expired = db.session.query(InviteToken).filter(
+        InviteToken.created_at < expiry_date,
+        InviteToken.used_at.is_(None)
+    ).all()
+    
+    if expired:
+        count = len(expired)
+        for token in expired:
+            db.session.delete(token)
+        db.session.commit()
+        return count
+    return 0
+
+
 class Group(db.Model):
     __tablename__ = "groups"
     id = db.Column(db.Integer, primary_key=True)

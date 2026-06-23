@@ -30,10 +30,12 @@ def get_user_statistics(user_id):
         if match.home_score is None:
             continue
         pred = UserPrediction.query.filter_by(user_id=user_id, match_id=match.id).first()
-        if not pred or pred.predicted_home_score is None:
+        if not pred:
             continue
         actual_hub = calc_hub(match.home_score, match.away_score)
-        pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        pred_hub = pred.predicted_hub
+        if pred_hub not in ("H", "U", "B") and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+            pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
         if pred_hub == actual_hub:
             correct_hub += 1
         if (pred.predicted_home_score == match.home_score and

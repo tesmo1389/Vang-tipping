@@ -59,6 +59,16 @@
 
       <div class="admin-card">
         <h3>Poengoversikt</h3>
+        {% set score_labels = {
+          'group_hub': 'Riktig HUB (gruppespill)',
+          'group_exact': 'Eksakt resultat (gruppespill)',
+          'group_winner': 'Riktig gruppevinner',
+          'group_second': 'Riktig andreplass',
+          'knockout_exact': 'Eksakt resultat (sluttspill)',
+          'knockout_advance': 'Riktig lag videre (sluttspill)',
+          'knockout_finalist': 'Riktig finalist',
+          'knockout_champion': 'Riktig verdensmester',
+        } %}
         <div class="admin-score-grid">
           <div class="admin-score-item">
             <div class="score-label">Totalt</div>
@@ -66,7 +76,7 @@
           </div>
           {% for k, v in breakdown.items() %}
           <div class="admin-score-item">
-            <div class="score-label">{{ k }}</div>
+            <div class="score-label">{{ score_labels.get(k, k) }}</div>
             <div class="score-value">{{ v }}</div>
           </div>
           {% endfor %}
@@ -252,7 +262,8 @@
   </main>
 
   <footer class="footer">
-    <p>VM 2026 Tipping Admin &copy; 2026</p>
+    <p>VM 2026 Tipping Admin &copy; 2026 - Versjon {{ app_version }}</p>
+    <p>Utviklet av Morten Tesaker</p>
   </footer>
 </body>
 </html>

@@ -11,7 +11,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from models import (
     db, User, InviteToken, Match, Group, Team, UserPrediction, GroupPrediction,
-    GroupStanding, CompetitionSetting, ScoreCache, now_utc
+    GroupStanding, CompetitionSetting, ScoreCache, now_utc, cleanup_expired_invites
 )
 from scoring import (
     get_user_total_points, get_scoreboard, get_user_score_breakdown,
@@ -54,6 +54,8 @@ def join(token):
 
 @user_bp.route("/join/<token>", methods=["POST"])
 def join_post(token):
+    cleanup_expired_invites()
+    
     invite = InviteToken.query.filter_by(token=token, is_active=True).first()
     if not invite:
         abort(404)
@@ -89,6 +91,14 @@ def index():
     user = get_current_user()
     if not user:
         return render_template("no_access.html")
+
+    group_matches_all = Match.query.filter_by(phase="group").all()
+    group_total_matches = len(group_matches_all)
+    group_tipped_matches = 0
+    for m in group_matches_all:
+        pred = UserPrediction.query.filter_by(user_id=user.id, match_id=m.id).first()
+        if pred and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+            group_tipped_matches += 1
 
     groups = Group.query.order_by(Group.name).all()
     group_data = []
@@ -146,6 +156,8 @@ def index():
     return render_template("user.html",
         user=user,
         group_data=group_data,
+        group_tipped_matches=group_tipped_matches,
+        group_total_matches=group_total_matches,
         match_points=get_per_match_points(user.id),
         total_points=get_user_total_points(user.id),
         active_tab="group",
@@ -260,6 +272,15 @@ def knockout():
     if not user:
         return render_template("no_access.html")
 
+    knockout_matches_all = Match.query.filter_by(phase="knockout").all()
+    knockout_open_matches = [m for m in knockout_matches_all if m.home_team_id and m.away_team_id]
+    knockout_total_matches = len(knockout_open_matches)
+    knockout_tipped_matches = 0
+    for m in knockout_open_matches:
+        pred = UserPrediction.query.filter_by(user_id=user.id, match_id=m.id).first()
+        if pred and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+            knockout_tipped_matches += 1
+
     round_order = ["round_of_32", "round_of_16", "quarter_final", "semi_final", "third_place", "final"]
     rounds = {}
     for rn in round_order:
@@ -275,6 +296,8 @@ def knockout():
         user=user,
         rounds=rounds,
         round_order=round_order,
+        knockout_tipped_matches=knockout_tipped_matches,
+        knockout_total_matches=knockout_total_matches,
         match_points=get_per_match_points(user.id),
         total_points=get_user_total_points(user.id),
         active_tab="knockout",

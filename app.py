@@ -16,6 +16,7 @@ from routes_user import user_bp
 from routes_admin import admin_bp
 
 OSLO_TZ = pytz.timezone("Europe/Oslo")
+APP_VERSION = "1.14"
 
 
 def create_app():
@@ -45,6 +46,14 @@ def create_app():
             dt = pytz.utc.localize(dt)
         return dt.astimezone(OSLO_TZ).strftime("%d.%m.%Y")
 
+    @app.template_filter("oslo_datetime")
+    def oslo_datetime_filter(dt):
+        if dt is None:
+            return ""
+        if not hasattr(dt, "tzinfo") or dt.tzinfo is None:
+            dt = pytz.utc.localize(dt)
+        return dt.astimezone(OSLO_TZ).strftime("%d.%m.%Y %H:%M")
+
     @app.template_filter("round_label")
     def round_label_filter(round_name):
         labels = {
@@ -61,6 +70,10 @@ def create_app():
     @app.template_global()
     def now_oslo():
         return datetime.now(OSLO_TZ).strftime("%d.%m.%Y")
+
+    @app.context_processor
+    def inject_app_version():
+        return {"app_version": APP_VERSION}
 
     with app.app_context():
         db.create_all()
