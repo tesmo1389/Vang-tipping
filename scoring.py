@@ -106,9 +106,10 @@ def calculate_user_scores(user_id):
             continue
 
         actual_hub = calc_hub(match.home_score, match.away_score)
-        pred_hub = pred.predicted_hub
-        if pred_hub not in ("H", "U", "B") and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+        if pred.predicted_home_score is not None and pred.predicted_away_score is not None:
             pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        else:
+            pred_hub = pred.predicted_hub
 
         if pred_hub == actual_hub:
             scores["group_hub"] += settings["group_hub"]
@@ -333,9 +334,10 @@ def get_per_match_points(user_id):
             result[match.id] = None
             continue
         actual_hub = calc_hub(match.home_score, match.away_score)
-        pred_hub = pred.predicted_hub
-        if pred_hub not in ("H", "U", "B") and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+        if pred.predicted_home_score is not None and pred.predicted_away_score is not None:
             pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        else:
+            pred_hub = pred.predicted_hub
         if pred_hub == actual_hub:
             if (pred.predicted_home_score is not None and pred.predicted_away_score is not None and
                     pred.predicted_home_score == match.home_score and

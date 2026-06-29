@@ -3,6 +3,7 @@ app.py - Hovedapplikasjon for VM 2026 tipping.
 Kjør med: python app.py
 """
 import os
+import json
 from datetime import datetime
 import pytz
 from flask import Flask, redirect, url_for
@@ -11,12 +12,21 @@ from sqlalchemy import text
 
 load_dotenv()
 
-from models import db, CompetitionSetting, ScoreSetting, Group, Team, Match, BracketEdge
+from models import (
+    db,
+    CompetitionSetting,
+    ScoreSetting,
+    Group,
+    Team,
+    Match,
+    BracketEdge,
+    ThirdPlaceAssignmentRule,
+)
 from routes_user import user_bp
 from routes_admin import admin_bp
 
 OSLO_TZ = pytz.timezone("Europe/Oslo")
-APP_VERSION = "1.14"
+APP_VERSION = "1.15"
 
 
 def create_app():
@@ -105,6 +115,7 @@ def _seed_defaults():
 
     # Bracket edges
     _seed_bracket_edges()
+    _seed_third_place_assignment_rules()
 
     # Normalize match lock times to be per-match (1h before kickoff)
     from datetime import timedelta
@@ -125,6 +136,47 @@ def _seed_defaults():
             )
 
     db.session.commit()
+
+
+def _seed_third_place_assignment_rules():
+    """Seed third-place assignment rules from JSON data file."""
+    rules_path = os.path.join(os.path.dirname(__file__), "data", "third_place_assignment_rules.json")
+    if not os.path.exists(rules_path):
+        print(f"WARNING: Missing rules file: {rules_path}")
+        return
+
+    try:
+        with open(rules_path, "r", encoding="utf-8") as f:
+            rules = json.load(f)
+    except Exception as exc:
+        print(f"WARNING: Could not load third-place rules: {exc}")
+        return
+
+    changed = False
+    for row in rules:
+        key = (row.get("qualified_groups_key") or "").strip()
+        if not key:
+            continue
+
+        existing = ThirdPlaceAssignmentRule.query.filter_by(qualified_groups_key=key).first()
+        if existing:
+            continue
+
+        db.session.add(ThirdPlaceAssignmentRule(
+            qualified_groups_key=key,
+            match_74_group=row.get("match_74_group"),
+            match_77_group=row.get("match_77_group"),
+            match_79_group=row.get("match_79_group"),
+            match_80_group=row.get("match_80_group"),
+            match_81_group=row.get("match_81_group"),
+            match_82_group=row.get("match_82_group"),
+            match_85_group=row.get("match_85_group"),
+            match_87_group=row.get("match_87_group"),
+        ))
+        changed = True
+
+    if changed:
+        db.session.commit()
 
 
 def _seed_bracket_edges():

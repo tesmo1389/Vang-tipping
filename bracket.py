@@ -370,24 +370,19 @@ def calculate_third_place_rankings():
     # Sort third-place teams
     third_teams.sort(key=lambda x: (-x["points"], -x["goal_difference"], -x["goals_for"], -x["fair_play_score"]))
 
+    # Rebuild ranking table from scratch to avoid stale rows when group third-place team changes.
+    ThirdPlaceRanking.query.delete()
+
     for rank, t in enumerate(third_teams, 1):
-        tpr = ThirdPlaceRanking.query.filter_by(group_id=t["group_id"], team_id=t["team_id"]).first()
-        if tpr:
-            tpr.rank = rank
-            tpr.points = t["points"]
-            tpr.goal_difference = t["goal_difference"]
-            tpr.goals_for = t["goals_for"]
-            tpr.qualified = rank <= 8
-            tpr.updated_at = now_utc()
-        else:
-            db.session.add(ThirdPlaceRanking(
-                group_id=t["group_id"],
-                team_id=t["team_id"],
-                rank=rank,
-                points=t["points"],
-                goal_difference=t["goal_difference"],
-                goals_for=t["goals_for"],
-                qualified=rank <= 8,
-            ))
+        db.session.add(ThirdPlaceRanking(
+            group_id=t["group_id"],
+            team_id=t["team_id"],
+            rank=rank,
+            points=t["points"],
+            goal_difference=t["goal_difference"],
+            goals_for=t["goals_for"],
+            fair_play_score=t["fair_play_score"],
+            qualified=rank <= 8,
+        ))
 
     db.session.commit()

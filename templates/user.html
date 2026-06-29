@@ -115,14 +115,12 @@
           {% set status_class = '' %}
           {% if match.is_finished %}
             {% if pred and pred.predicted_home_score is not none %}
+              {% set pred_hub_calc = 'H' if pred.predicted_home_score > pred.predicted_away_score else ('U' if pred.predicted_home_score == pred.predicted_away_score else 'B') %}
+              {% set actual_hub_calc = 'H' if match.home_score > match.away_score else ('U' if match.home_score == match.away_score else 'B') %}
               {% if pred.predicted_home_score == match.home_score and pred.predicted_away_score == match.away_score %}
                 {% set status_class = 'match-exact' %}
-              {% elif pred.predicted_hub %}
-                {% if pred.predicted_hub == ('H' if match.home_score > match.away_score else ('U' if match.home_score == match.away_score else 'B')) %}
-                  {% set status_class = 'match-hub' %}
-                {% else %}
-                  {% set status_class = 'match-wrong' %}
-                {% endif %}
+              {% elif pred_hub_calc == actual_hub_calc %}
+                {% set status_class = 'match-hub' %}
               {% else %}
                 {% set status_class = 'match-wrong' %}
               {% endif %}

@@ -398,9 +398,10 @@ def user_detail(user_id):
     )
 
     for pred, match in match_preds:
-        pred_hub = pred.predicted_hub
-        if pred_hub is None and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+        if pred.predicted_home_score is not None and pred.predicted_away_score is not None:
             pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+        else:
+            pred_hub = pred.predicted_hub
 
         actual_hub = None
         if match.home_score is not None and match.away_score is not None:
@@ -567,9 +568,10 @@ def user_predictions_pdf(user_id):
         group_rows = []
         knockout_rows = []
         for pred, match in match_preds:
-            pred_hub = pred.predicted_hub
-            if pred_hub is None and pred.predicted_home_score is not None and pred.predicted_away_score is not None:
+            if pred.predicted_home_score is not None and pred.predicted_away_score is not None:
                 pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+            else:
+                pred_hub = pred.predicted_hub
             actual_hub = None
             if match.home_score is not None and match.away_score is not None:
                 actual_hub = calc_hub(match.home_score, match.away_score)
@@ -619,6 +621,235 @@ def user_predictions_pdf(user_id):
         mimetype="application/pdf",
         as_attachment=True,
         download_name=f"tipping_user_{user.id}.pdf"
+    )
+
+
+@admin_bp.route("/all-users-report.pdf")
+def all_users_report_pdf():
+    """Generate a compact A4 PDF report — one page per user — with all predictions and points."""
+    if not admin_required():
+        abort(403)
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    )
+
+    users = User.query.filter_by(is_active=True).order_by(User.name).all()
+    settings = get_score_settings()
+    all_matches = Match.query.order_by(Match.match_number).all()
+    all_groups = Group.query.order_by(Group.name).all()
+
+    buf = io.BytesIO()
+    mar = 6 * mm
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=mar, rightMargin=mar,
+        topMargin=mar, bottomMargin=mar,
+        title="VM 2026 – Tipperapport",
+    )
+
+    PAGE_W = A4[0] - 2 * mar   # ~539 pt
+    FS = 5.8
+    PAD = 0.7
+
+    def _ts():
+        return TableStyle([
+            ("FONTNAME",      (0, 0), (-1,  0), "Helvetica-Bold"),
+            ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE",      (0, 0), (-1, -1), FS),
+            ("LEADING",       (0, 0), (-1, -1), 6.8),
+            ("TOPPADDING",    (0, 0), (-1, -1), PAD),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), PAD),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 2),
+            ("GRID",          (0, 0), (-1, -1), 0.3, colors.Color(0.7, 0.7, 0.7)),
+            ("BACKGROUND",    (0, 0), (-1,  0), colors.Color(0.82, 0.82, 0.82)),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.Color(0.95, 0.95, 0.95)]),
+        ])
+
+    s_title   = ParagraphStyle("tit", fontName="Helvetica-Bold", fontSize=9, leading=11)
+    s_section = ParagraphStyle("sec", fontName="Helvetica-Bold", fontSize=6.4,  leading=7.2,
+                                spaceBefore=3, spaceAfter=1)
+
+    # ── fixed widths for match columns ─────────────────────────────
+    HALF = (PAGE_W - 6) / 2          # gap of 6 pt between the two match columns
+    M_FIXED = 14 + 26 + 22 + 26 + 14  # #, tip, hub, fasit, pts  = 102
+    M_NAME  = HALF - M_FIXED          # remaining for team name (~164 pt)
+    MCW = [14, M_NAME, 26, 26, 22, 14]
+    M_HDR = ["#", "Kamp", "Tip", "HUB", "Fasit", "p"]
+
+    def _match_table(rows):
+        t = Table(rows, colWidths=MCW)
+        st = _ts()
+        for r_i, row in enumerate(rows[1:], 1):
+            try:
+                p = int(row[5])
+                has_tip = len(row) > 2 and row[2] != "-"
+                if p > 0 and has_tip:
+                    st.add("BACKGROUND", (2, r_i), (2, r_i), colors.Color(0.74, 0.93, 0.74))
+                elif p == 0 and has_tip:
+                    st.add("BACKGROUND", (2, r_i), (2, r_i), colors.Color(0.98, 0.78, 0.78))
+                if p == 0:
+                    st.add("TEXTCOLOR", (5, r_i), (5, r_i), colors.Color(0.6, 0.6, 0.6))
+            except (ValueError, TypeError, IndexError):
+                pass
+        t.setStyle(st)
+        return t
+
+    story = []
+
+    for u_idx, user in enumerate(users):
+        if u_idx > 0:
+            story.append(PageBreak())
+
+        per_match = get_per_match_points(user.id)
+        total     = get_user_total_points(user.id)
+        bd        = get_user_score_breakdown(user.id)
+
+        # ── header ────────────────────────────────────────────────
+        story.append(Paragraph(
+            f"<b>{user.name}</b>"
+            f" &nbsp;·&nbsp; Totalt: <b>{total} poeng</b>"
+            f" &nbsp;·&nbsp; VM 2026 Tipping"
+            f" &nbsp;·&nbsp; {datetime.now(OSLO_TZ).strftime('%d.%m.%Y')}",
+            s_title,
+        ))
+
+        # ── score breakdown (1-row table) ──────────────────────────
+        cats = [
+            ("Riktig utfall (grp)", bd.get("group_hub",          0)),
+            ("Eksakt score (grp)",  bd.get("group_exact",        0)),
+            ("Gruppevinner",        bd.get("group_winner",       0)),
+            ("2. plass gruppe",     bd.get("group_second",       0)),
+            ("Eksakt (sluttspill)", bd.get("knockout_exact",     0)),
+            ("Videre",              bd.get("knockout_advance",   0)),
+            ("Finalist",            bd.get("knockout_finalist",  0)),
+            ("Verdensmester",       bd.get("knockout_champion",  0)),
+        ]
+        cw = PAGE_W / len(cats)
+        bd_tbl = Table(
+            [[c[0] for c in cats], [str(c[1]) for c in cats]],
+            colWidths=[cw] * len(cats),
+        )
+        bd_st = _ts()
+        bd_st.add("ALIGN", (0, 0), (-1, -1), "CENTER")
+        bd_tbl.setStyle(bd_st)
+        story.append(Spacer(1, 2))
+        story.append(bd_tbl)
+        story.append(Spacer(1, 1))
+
+        # ── group placement predictions ────────────────────────────
+        story.append(Paragraph("Gruppeplasseringer", s_section))
+        group_col_w = 42
+        points_col_w = 18
+        tip_col_w = (PAGE_W - group_col_w - points_col_w) / 2
+        GP_CW = [group_col_w, tip_col_w, tip_col_w, points_col_w]
+        gp_data = [["Gr.", "Tipping (V / 2)", "Fasit (V / 2)", "p"]]
+        for group in all_groups:
+            gp = GroupPrediction.query.filter_by(user_id=user.id, group_id=group.id).first()
+            standings = GroupStanding.query.filter_by(group_id=group.id).all()
+            ranked = sorted(standings, key=lambda s: s.rank or 99)
+            actual_ids = [s.team_id for s in ranked]
+            aw  = ranked[0].team.name if len(ranked) >= 1 and ranked[0].team else "-"
+            as_ = ranked[1].team.name if len(ranked) >= 2 and ranked[1].team else "-"
+            if gp:
+                pw  = gp.predicted_winner.name if gp.predicted_winner else "-"
+                ps  = gp.predicted_second.name if gp.predicted_second else "-"
+                wp  = settings["group_winner"] if gp.predicted_winner_team_id and actual_ids and gp.predicted_winner_team_id == actual_ids[0] else 0
+                sp  = settings["group_second"] if gp.predicted_second_team_id and len(actual_ids) >= 2 and gp.predicted_second_team_id == actual_ids[1] else 0
+                pts_g = wp + sp
+            else:
+                pw, ps, pts_g = "-", "-", 0
+            gp_data.append([
+                group.name,
+                f"{pw} / {ps}",
+                f"{aw} / {as_}",
+                str(pts_g) if pts_g else "-",
+            ])
+
+        gp_tbl = Table(gp_data, colWidths=GP_CW)
+        gp_st = _ts()
+        for r_i, row in enumerate(gp_data[1:], 1):
+            if row[3] not in ("-", "0", ""):
+                gp_st.add("BACKGROUND", (3, r_i), (3, r_i), colors.Color(0.65, 1.0, 0.65))
+        gp_tbl.setStyle(gp_st)
+        story.append(gp_tbl)
+        story.append(Spacer(1, 1))
+
+        # ── all matches – two columns ──────────────────────────────
+        story.append(Paragraph("Kamper (gruppe + sluttspill)", s_section))
+
+        pred_map = {
+            m.id: p
+            for p, m in (
+                db.session.query(UserPrediction, Match)
+                .join(Match, UserPrediction.match_id == Match.id)
+                .filter(UserPrediction.user_id == user.id)
+                .all()
+            )
+        }
+
+        left_rows  = [M_HDR[:]]
+        right_rows = [M_HDR[:]]
+
+        split_at = (len(all_matches) + 1) // 2
+        for idx, match in enumerate(all_matches):
+            pred  = pred_map.get(match.id)
+            home  = match.home_team.name if match.home_team else (match.home_slot_source or "?")
+            away  = match.away_team.name if match.away_team else (match.away_slot_source or "?")
+            phase_tag = "G" if match.phase == "group" else "KO"
+            kamp  = f"{phase_tag}: {home} vs {away}"
+            fasit = (f"{match.home_score}–{match.away_score}"
+                     if match.home_score is not None else "-")
+            if pred and pred.predicted_home_score is not None:
+                tip      = f"{pred.predicted_home_score}–{pred.predicted_away_score}"
+                pred_hub = calc_hub(pred.predicted_home_score, pred.predicted_away_score)
+            else:
+                tip      = "-"
+                pred_hub = pred.predicted_hub if pred else None
+            act_hub = (calc_hub(match.home_score, match.away_score)
+                       if match.home_score is not None else "-")
+            if pred_hub and act_hub in ("H", "U", "B"):
+                hub = f"{pred_hub} {'OK' if pred_hub == act_hub else 'FEIL'}"
+            else:
+                hub = pred_hub or "-"
+            pts  = per_match.get(match.id)
+            pts_s = str(pts) if pts is not None else "-"
+
+            row = [str(match.match_number), kamp, tip, hub, fasit, pts_s]
+            if idx < split_at:
+                left_rows.append(row)
+            else:
+                right_rows.append(row)
+
+        while len(right_rows) < len(left_rows):
+            right_rows.append(["", "", "", "", "", ""])
+
+        two_col = Table(
+            [[_match_table(left_rows), _match_table(right_rows)]],
+            colWidths=[HALF + 3, HALF + 3],
+        )
+        two_col.setStyle(TableStyle([
+            ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
+            ("TOPPADDING",    (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.append(two_col)
+
+    doc.build(story)
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="vm2026_tipperapport.pdf",
     )
 
 

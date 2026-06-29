@@ -284,5 +284,16 @@
     "match_82_group": "G",
     "match_85_group": "H",
     "match_87_group": "F"
+  },
+  {
+    "qualified_groups_key": "B,D,E,F,I,J,K,L",
+    "match_74_group": "D",
+    "match_77_group": "F",
+    "match_79_group": "E",
+    "match_80_group": "K",
+    "match_81_group": "B",
+    "match_82_group": "I",
+    "match_85_group": "J",
+    "match_87_group": "L"
   }
 ]
